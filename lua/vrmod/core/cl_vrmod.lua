@@ -339,6 +339,7 @@ if CLIENT then
 			mat_disable_lightwarp = "1",
 			mat_disable_ps_patch = "1",
 			mat_motion_blur_enabled = "0",
+			mat_fastspecular = "0",
 			mat_reduceparticles = "1",
 			r_shadowrendertotexture = "0",
 			r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
