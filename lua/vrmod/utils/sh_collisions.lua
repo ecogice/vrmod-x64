@@ -4,7 +4,7 @@ vrmod.utils = vrmod.utils or {}
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 --GLOBALS
 vrmod.SMOOTHING_FACTOR = 0.98
-vrmod.DEFAULT_RADIUS = 2.2
+vrmod.DEFAULT_RADIUS = 1.8
 vrmod.DEFAULT_REACH = 5.0
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
@@ -19,9 +19,6 @@ vrmod.modelCache = {}
 vrmod.collisionSpheres = {}
 vrmod.collisionBoxes = {}
 local pending = {}
-local lastLeftPos = Vector(0, 0, 0)
-local lastRightPos = Vector(0, 0, 0)
-local lastRightAng = Angle(0, 0, 0)
 local lastNonClippedPos = {
     left = nil,
     right = nil
@@ -481,59 +478,55 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
 end
 
 function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
-    local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    local gripping = hand == "left" and leftGrip or hand == "right" and rightGrip
+    radius = radius or vrmod.DEFAULT_RADIUS
     local shapeMins = mins or Vector(-radius, -radius, -radius)
     local shapeMaxs = maxs or Vector(radius, radius, radius)
-    ang = ang or Angle(0, 0, 0) -- Fallback to zero angle
+    ang = ang or Angle(0, 0, 0)
     ang:Normalize()
     local isClipped, hitNormal
+    -- Sphere or box collision
     if mins and maxs then
-        -- Clipping check: full box, no reach
-        --isClipped, hitNormal = SphereCollidesWithWorld(pos, reach)
         isClipped, hitNormal = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end end
+        if DebugEnabled() and isClipped then vrmod.logger.Debug("Box collision for:", hand, "Pos:", pos) end
     else
-        if not radius then radius = vrmod.DEFAULT_RADIUS end
         isClipped, hitNormal = SphereCollidesWithWorld(pos, radius)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end end
+        if DebugEnabled() and isClipped then vrmod.logger.Debug("Sphere collision for:", hand, "Pos:", pos, "Radius:", radius) end
     end
 
+    -- Fast per-frame push-out
     local pushOutPos = pos
-    if isClipped and not gripping then
+    if isClipped then
+        local pushDistance = 1.5 -- small buffer to push hand out
         if lastNonClippedPos[hand] then
+            -- Bias toward last safe position
             pushOutPos = lastNonClippedPos[hand]
         else
-            local traceOut = util.TraceHull({
-                start = pos,
-                endpos = pos + hitNormal * 2, -- Increase trace distance
-                mins = shapeMins, -- Smaller hull for correction
-                maxs = shapeMaxs,
-                mask = MASK_SOLID_BRUSHONLY
-            })
-
-            pushOutPos = traceOut.Hit and traceOut.HitPos + traceOut.HitNormal or pos + hitNormal
+            -- Single-step push along hit normal
+            pushOutPos = pos + hitNormal * pushDistance
         end
 
         cachedPushOutPos[hand] = pushOutPos
     else
+        -- Update last safe position
         lastNonClippedPos[hand] = pos
         cachedPushOutPos[hand] = nil
     end
 
-    local reachHit
+    -- Reach check (for interactions)
+    local reachHit = false
     if mins and maxs then
         reachHit, _ = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs, reach)
     else
         local tr = util.TraceLine({
             start = pos,
-            endpos = pos + ang:Forward() * reach,
+            endpos = pos + ang:Forward() * (reach or vrmod.DEFAULT_REACH),
             mask = MASK_SOLID_BRUSHONLY
         })
 
         reachHit = tr.Hit and tr.HitWorld or false
     end
 
+    -- Build return shape
     local shape = {
         pos = pos,
         radius = radius,
@@ -543,10 +536,9 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         hit = reachHit,
         pushOutPos = pushOutPos,
         isClipped = isClipped,
-        hitNormal = hitNormal
+        hitNormal = hitNormal,
+        hitWorld = mins and maxs and BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs) or SphereCollidesWithWorld(pos, radius)
     }
-
-    shape.hitWorld = mins and maxs and BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs) or SphereCollidesWithWorld(pos, radius or vrmod.DEFAULT_RADIUS)
     return shape
 end
 
@@ -626,88 +618,70 @@ end
 function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos, righthandAng)
     -- Early out if no collision broad-phase
     if not vrmod._collisionNearby then
-        vrmod.collisionSpheres = {}
-        vrmod.collisionBoxes = {}
-        vrmod._collisionShapeByHand = {
+        vrmod.collisionSpheres = vrmod.collisionSpheres or {}
+        vrmod.collisionBoxes = vrmod.collisionBoxes or {}
+        vrmod._collisionShapeByHand = vrmod._collisionShapeByHand or {
             left = nil,
             right = nil
         }
 
-        lastNonClippedPos.left = nil
-        lastNonClippedPos.right = nil
-        lastNonClippedNormal.left = nil
-        lastNonClippedNormal.right = nil
-        cachedPushOutPos.left = nil
-        cachedPushOutPos.right = nil
+        lastNonClippedPos.left, lastNonClippedPos.right = nil, nil
+        lastNonClippedNormal.left, lastNonClippedNormal.right = nil, nil
+        cachedPushOutPos.left, cachedPushOutPos.right = nil, nil
         return lefthandPos, lefthandAng, righthandPos, righthandAng
     end
 
     local ply = LocalPlayer()
     if not IsValid(ply) then return lefthandPos, lefthandAng, righthandPos, righthandAng end
-    local wep = ply:GetActiveWeapon()
-    if not vrmod.utils.IsValidWep(wep) then vrmod.collisionBoxes = {} end
-    -- Get climbing state
+    if not vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then vrmod.collisionBoxes = vrmod.collisionBoxes or {} end
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
     -- Offset positions
     local leftPos = lefthandPos + lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightPos = righthandPos + righthandAng:Forward() * vrmod.DEFAULT_OFFSET
-    vrmod.collisionSpheres = {}
-    vrmod._collisionShapeByHand = {
+    vrmod.collisionSpheres = vrmod.collisionSpheres or {}
+    vrmod._collisionShapeByHand = vrmod._collisionShapeByHand or {
         left = nil,
         right = nil
     }
 
     vrmod._lastRelFrame = vrmod._lastRelFrame or {}
-    local POS_TOLERANCE = 0.05
-    local ANG_TOLERANCE = 1.0
-    -- LEFT HAND
-    if leftGrip then
-        cachedPushOutPos.left = nil
-        lastNonClippedPos.left = nil
-        lastNonClippedNormal.left = nil
-        local hmdPos = g_VR.tracking.hmd.pos or Vector()
-        local yawAng = Angle(0, ply:InVehicle() and ply:EyeAngles().yaw or g_VR.characterYaw, 0)
-        local relPos, relAng = WorldToLocal(leftPos, lefthandAng, hmdPos, yawAng)
-        vrmod._lastRelFrame.left = {
-            pos = relPos,
-            ang = relAng
-        }
-    else
-        local shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH)
-        vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-        vrmod._collisionShapeByHand.left = shape
-        if shape and shape.isClipped then
-            -- handle push-out
-            local corrected = shape.pushOutPos or leftPos
-            lefthandPos = corrected
-            cachedPushOutPos.left = corrected
-            lastNonClippedNormal.left = shape.hitNormal
+    -- Helper function for per-hand collision
+    local function handleHand(pos, ang, hand, isGripping)
+        if isGripping then
+            -- Clear caches when climbing
+            cachedPushOutPos[hand] = nil
+            lastNonClippedPos[hand] = nil
+            lastNonClippedNormal[hand] = nil
+            -- Update relative frame for climbing
+            local hmdPos = g_VR.tracking.hmd.pos or Vector()
+            local yawAng = Angle(0, ply:InVehicle() and ply:EyeAngles().yaw or g_VR.characterYaw, 0)
+            local relPos, relAng = WorldToLocal(pos, ang, hmdPos, yawAng)
+            vrmod._lastRelFrame[hand] = {
+                pos = relPos,
+                ang = relAng
+            }
+            return pos, ang
+        else
+            -- Perform collision check
+            local shape = vrmod.utils.CheckWorldCollisions(pos, vrmod.DEFAULT_RADIUS, nil, nil, ang, hand, vrmod.DEFAULT_REACH)
+            vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
+            vrmod._collisionShapeByHand[hand] = shape
+            if shape.isClipped then
+                local corrected = shape.pushOutPos or pos
+                cachedPushOutPos[hand] = corrected
+                lastNonClippedNormal[hand] = shape.hitNormal
+                return corrected, ang
+            else
+                lastNonClippedPos[hand] = pos
+                cachedPushOutPos[hand] = nil
+                return pos, ang
+            end
         end
     end
 
-    -- RIGHT HAND
-    if rightGrip then
-        cachedPushOutPos.right = nil
-        lastNonClippedPos.right = nil
-        lastNonClippedNormal.right = nil
-        local hmdPos = g_VR.tracking.hmd.pos or Vector()
-        local yawAng = Angle(0, ply:InVehicle() and ply:EyeAngles().yaw or g_VR.characterYaw, 0)
-        local relPos, relAng = WorldToLocal(rightPos, righthandAng, hmdPos, yawAng)
-        vrmod._lastRelFrame.right = {
-            pos = relPos,
-            ang = relAng
-        }
-    else
-        local shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH)
-        vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-        vrmod._collisionShapeByHand.right = shape
-        if shape and shape.isClipped then
-            local corrected = shape.pushOutPos or rightPos
-            righthandPos = corrected
-            cachedPushOutPos.right = corrected
-            lastNonClippedNormal.right = shape.hitNormal
-        end
-    end
+    -- Process both hands
+    lefthandPos, lefthandAng = handleHand(leftPos, lefthandAng, "left", leftGrip)
+    righthandPos, righthandAng = handleHand(rightPos, righthandAng, "right", rightGrip)
     return lefthandPos, lefthandAng, righthandPos, righthandAng
 end
 
