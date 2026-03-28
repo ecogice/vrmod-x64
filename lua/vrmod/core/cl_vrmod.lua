@@ -159,19 +159,11 @@ if CLIENT then
 		if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils then
 			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
 			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
 			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			-- Only update hands that are NOT gripping
-			if not leftGrip then
-				g_VR.tracking.pose_lefthand.pos = leftPos
-				g_VR.tracking.pose_lefthand.ang = leftAng
-			end
-
-			if not rightGrip then
-				g_VR.tracking.pose_righthand.pos = rightPos
-				g_VR.tracking.pose_righthand.ang = rightAng
-			end
-
+			g_VR.tracking.pose_lefthand.pos = leftPos
+			g_VR.tracking.pose_lefthand.ang = leftAng
+			g_VR.tracking.pose_righthand.pos = rightPos
+			g_VR.tracking.pose_righthand.ang = rightAng
 			vrmod.utils.UpdateViewModelPos(rightPos, rightAng)
 		end
 	end
