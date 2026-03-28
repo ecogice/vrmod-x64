@@ -53,7 +53,7 @@ function vrmod.utils.GetSteeringInfo(ply)
             type = "motorcycle"
         },
         car = {
-            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel", "steer", "steerw_bone"},
+            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel", "steer", "steerw_bone", "driving"},
             type = "car"
         }
     }
