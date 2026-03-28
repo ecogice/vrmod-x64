@@ -4,7 +4,7 @@ vrmod.utils = vrmod.utils or {}
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 --GLOBALS
 vrmod.SMOOTHING_FACTOR = 0.98
-vrmod.DEFAULT_RADIUS = 1.69
+vrmod.DEFAULT_RADIUS = 2.2
 vrmod.DEFAULT_REACH = 5.0
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
@@ -474,10 +474,9 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
         return
     end
 
-    local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
-    local leftNearby = not leftGrip and SphereCollidesWithWorld(leftPos, 30)
-    local rightNearby = not rightGrip and SphereCollidesWithWorld(rightPos, bigRadius)
+    local leftNearby = SphereCollidesWithWorld(leftPos, 30)
+    local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
     vrmod._collisionNearby = leftNearby or rightNearby
 end
 
