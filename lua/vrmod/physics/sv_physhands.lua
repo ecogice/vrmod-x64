@@ -1,109 +1,133 @@
 if CLIENT then return end
 local vrHands = {}
--- Utility to get cached physics data from weapon
+local function Log(msg, ...)
+    vrmod.logger.Debug("[VRHand] " .. msg, ...)
+end
+
+-- ==================== YOUR ORIGINAL WEAPON LOGIC ====================
 local function GetCachedWeaponParams(wep, ply, side)
     local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
     if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
     return radius, reach, mins, maxs, angles
 end
 
--- Applies sphere collision
 local function ApplySphere(hand, handData, radius)
     if not IsValid(hand) then return end
-    hand:PhysicsInitSphere(radius, "metal_bouncy")
+    Log("ApplySphere radius=%.2f", radius)
+    hand:PhysicsInitSphere(radius, "metal")
+    hand:SetSolid(SOLID_VPHYSICS)
+    hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
+    hand:Activate()
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
-        phys:SetMass(1)
+        phys:SetMass(70)
         handData.phys = phys
+        Log("ApplySphere SUCCESS")
     end
 end
 
--- Applies box collision
 local function ApplyBox(hand, handData, mins, maxs, angles)
     if not IsValid(hand) then return end
+    Log("ApplyBox mins=%s maxs=%s", tostring(mins), tostring(maxs))
+    if angles then hand:SetAngles(angles) end
     hand:PhysicsInitBox(mins, maxs)
-    --hand:SetAngles(angles)
+    hand:SetSolid(SOLID_VPHYSICS)
+    hand:Activate()
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
-        phys:SetMass(1)
+        phys:SetMass(70)
         handData.phys = phys
+        Log("ApplyBox SUCCESS")
     end
 end
 
--- Apply appropriate collision shape based on weapon
 local function UpdateWeaponCollisionShape(ply, wep)
     if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+    Log("UpdateWeaponCollisionShape called for %s → %s", ply:Nick(), IsValid(wep) and wep:GetClass() or "nil")
     timer.Simple(0.1, function()
         if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
         local hands = vrHands[ply]
-        if not hands or not hands.right or not IsValid(hands.right.ent) then
-            vrmod.logger.Debug("UpdateWeaponCollisionShape: No valid right hand for %s", ply:Nick())
-            return
-        end
-
+        if not hands or not hands.right or not IsValid(hands.right.ent) then return end
         local right = hands.right
         local hand = right.ent
         if not vrmod.utils.IsValidWep(wep) then
-            vrmod.logger.Debug("UpdateWeaponCollisionShape: Invalid weapon %s, applying default sphere", tostring(wep))
             timer.Simple(0, function() ApplySphere(hand, right, vrmod.DEFAULT_RADIUS) end)
             return
         end
 
         local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
-        if not radius or not mins or not maxs or not angles or radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH and mins == vrmod.DEFAULT_MINS and maxs == vrmod.DEFAULT_MAXS then
-            vrmod.logger.Debug("UpdateWeaponCollisionShape: Invalid or default params for %s, retrying", wep:GetClass())
+        if not radius or not mins or not maxs or not angles or radius == vrmod.DEFAULT_RADIUS then
             timer.Simple(0.5, function() UpdateWeaponCollisionShape(ply, wep) end)
             return
         end
 
-        vrmod.logger.Debug("UpdateWeaponCollisionShape: Applying box for %s, mins=%s, maxs=%s", wep:GetClass(), tostring(mins), tostring(maxs))
         timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
     end)
 end
 
--- Triggers on weapon switch
-hook.Add("PlayerSwitchWeapon", "VRHand_UpdateCollisionOnWeaponSwitch", function(ply, oldWep, newWep) UpdateWeaponCollisionShape(ply, newWep) end)
+-- ==================== SPAWN ====================
 local function SpawnVRHands(ply)
     if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
     if not vrHands[ply] then vrHands[ply] = {} end
     local hands = vrHands[ply]
+    Log("SpawnVRHands started for %s", ply:Nick())
     for _, side in ipairs({"right", "left"}) do
         timer.Simple(0, function()
-            if not IsValid(ply) or not ply:Alive() then return end
-            local handData = hands[side]
-            local hand = handData and IsValid(handData.ent) and handData.ent or nil
-            if not IsValid(hand) then
-                hand = ents.Create("base_anim")
-                if not IsValid(hand) then return end
-                hand:SetPos(ply:GetPos())
-                hand:Spawn()
-                hand:SetPersistent(true)
-                hand:SetNoDraw(true)
-                hand:DrawShadow(false)
-                hand:SetNWBool("isVRHand", true)
-                -- no model, just physics sphere
-                local radius = 2
-                hand:PhysicsInitSphere(radius, "metal_bouncy")
-                hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
-                hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
-                hand:Activate()
-                local phys = hand:GetPhysicsObject()
-                if IsValid(phys) then
-                    phys:SetMass(20)
-                    hands[side] = {
-                        ent = hand,
-                        phys = phys
-                    }
-                else
-                    hand:Remove()
-                    return
-                end
+            if hands[side] and IsValid(hands[side].ent) then return end
+            local hand = ents.Create("prop_physics")
+            if not IsValid(hand) then return end
+            hand:SetModel("models/hunter/plates/plate.mdl")
+            hand:SetPos(ply:GetPos())
+            hand:Spawn()
+            hand:SetNoDraw(true)
+            hand:DrawShadow(false)
+            hand:SetNWBool("isVRHand", true)
+            hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
+            local radius = 2.8
+            hand:PhysicsInitSphere(radius, "metal")
+            hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
+            hand:Activate()
+            local phys = hand:GetPhysicsObject()
+            if IsValid(phys) then
+                phys:SetMass(70)
+                hands[side] = {
+                    ent = hand,
+                    phys = phys
+                }
+
+                -- Realistic velocity push on actual collision
+                hand:AddCallback("PhysicsCollide", function(ent, data)
+                    local hit = data.HitEntity
+                    if not IsValid(hit) or hit:GetClass() ~= "prop_physics" then return end
+                    -- Safe real relative velocity
+                    local speed = 80
+                    if side == "right" then
+                        local vel = vrmod.GetRightHandVelocityRelative and vrmod.GetRightHandVelocityRelative(ply)
+                        if vel then speed = vel:Length() end
+                    else
+                        local vel = vrmod.GetLeftHandVelocityRelative and vrmod.GetLeftHandVelocityRelative(ply)
+                        if vel then speed = vel:Length() end
+                    end
+
+                    if speed > 35 then
+                        local physHit = hit:GetPhysicsObject()
+                        if IsValid(physHit) then
+                            local pushDir = data.HitNormal * -1
+                            physHit:ApplyForceCenter(pushDir * speed * 14.0)
+                            Log("PHYSICS PUSH %s → prop | Speed: %.1f", side, speed)
+                        end
+                    end
+                end)
+
+                Log("%s hand created", side)
+            else
+                hand:Remove()
             end
         end)
     end
 
-    timer.Simple(0.1, function()
-        if IsValid(ply) and hands.right and IsValid(hands.right.ent) then
+    timer.Simple(0.2, function()
+        if hands.right and IsValid(hands.right.ent) then
             local wep = ply:GetActiveWeapon()
             if vrmod.utils.IsValidWep(wep) then UpdateWeaponCollisionShape(ply, wep) end
         end
@@ -114,67 +138,68 @@ local function RemoveVRHands(ply)
     if not IsValid(ply) then return end
     local hands = vrHands[ply]
     if not hands then return end
-    for _, side in pairs(hands) do
-        local ent = side.ent
-        if IsValid(ent) then
-            ent:SetNoDraw(true)
-            ent:SetCollisionGroup(COLLISION_GROUP_DEBRIS)
-            ent:SetPos(Vector(0, 0, -10000))
-            if IsValid(side.phys) then
-                side.phys:EnableMotion(false)
-                side.phys:Sleep()
-            end
-        end
+    for _, data in pairs(hands) do
+        if IsValid(data.ent) then data.ent:Remove() end
     end
 end
 
-hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
-    local hands = vrHands[ply]
-    if (not hands or not hands.right or not hands.left) and not ply:InVehicle() then
-        RemoveVRHands(ply)
-        timer.Simple(1, function() SpawnVRHands(ply) end)
-        return
-    elseif ply:InVehicle() then
-        RemoveVRHands(ply)
-        return
-    end
+-- ==================== SHADOW CONTROL IN THINK ====================
+hook.Add("Think", "VRHand_PhysicsSync", function()
+    for _, ply in ipairs(player.GetHumans()) do
+        if not vrmod.IsPlayerInVR(ply) then continue end
+        local hands = vrHands[ply]
+        if not hands or not hands.right or not hands.left then
+            if not ply:InVehicle() then
+                RemoveVRHands(ply)
+                timer.Simple(1, function() SpawnVRHands(ply) end)
+            end
 
-    local function UpdateHand(side, getPos, getAng)
-        local hand = hands[side]
-        if not hand or not IsValid(hand.ent) or not IsValid(hand.phys) then return end
-        local pos = getPos(ply)
-        local ang = getAng(ply)
-        -- Apply forward offset
-        local offsetPos = pos + ang:Forward() * vrmod.DEFAULT_OFFSET
-        local phys = hand.phys
-        phys:Wake()
-        phys:ComputeShadowControl({
-            econdstoarrive = engine.TickInterval(),
-            pos = offsetPos,
-            angle = ang,
-            maxangular = 5000,
-            maxangulardamp = 5000,
-            maxspeed = 2000000,
-            maxspeeddamp = 20000,
-            dampfactor = 0.3,
-            teleportdistance = 2000,
-            deltatime = 0,
-        })
-    end
+            continue
+        end
 
-    UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
-    UpdateHand("left", vrmod.GetLeftHandPos, vrmod.GetLeftHandAng)
+        if ply:InVehicle() then
+            RemoveVRHands(ply)
+            continue
+        end
+
+        local function UpdateHand(side)
+            local handData = hands[side]
+            if not handData or not IsValid(handData.ent) or not IsValid(handData.phys) then return end
+            local pos = side == "right" and vrmod.GetRightHandPos(ply) or vrmod.GetLeftHandPos(ply)
+            local ang = side == "right" and vrmod.GetRightHandAng(ply) or vrmod.GetLeftHandAng(ply)
+            local targetPos = pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
+            local phys = handData.phys
+            phys:Wake()
+            phys:ComputeShadowControl({
+                secondstoarrive = engine.TickInterval() * 3.5,
+                pos = targetPos,
+                angle = ang,
+                maxangular = 750,
+                maxangulardamp = 750,
+                maxspeed = 14500,
+                maxspeeddamp = 1700,
+                dampfactor = 0.83,
+                teleportdistance = 250,
+                deltatime = 0,
+            })
+        end
+
+        UpdateHand("right")
+        UpdateHand("left")
+    end
 end)
 
+-- ==================== HOOKS ====================
+hook.Add("PlayerSwitchWeapon", "VRHand_UpdateCollisionOnWeaponSwitch", function(ply, oldWep, newWep) UpdateWeaponCollisionShape(ply, newWep) end)
 hook.Add("VRMod_Pickup", "VRHand_BlockPickup", function(ply, ent)
     local hands = vrHands[ply]
     if hands and (ent == hands.right.ent or ent == hands.left.ent) then return false end
 end)
 
-hook.Add("VRMod_Start", "VRHand_VRStart", function(ply) SpawnVRHands(ply) end)
-hook.Add("PlayerSpawn", "VRHand_PlayerSpawn", function(ply) if vrmod.IsPlayerInVR(ply) then timer.Simple(0.1, function() if IsValid(ply) then SpawnVRHands(ply) end end) end end)
-hook.Add("PlayerDeath", "VRHand_PlayerDeath", function(ply) RemoveVRHands(ply) end)
-hook.Add("VRMod_Exit", "VRHand_VREnd", function(ply) RemoveVRHands(ply) end)
+hook.Add("VRMod_Start", "VRHand_VRStart", SpawnVRHands)
+hook.Add("PlayerSpawn", "VRHand_PlayerSpawn", function(ply) if vrmod.IsPlayerInVR(ply) then timer.Simple(0.1, function() SpawnVRHands(ply) end) end end)
+hook.Add("PlayerDeath", "VRHand_PlayerDeath", RemoveVRHands)
+hook.Add("VRMod_Exit", "VRHand_VREnd", RemoveVRHands)
 hook.Add("PlayerDisconnected", "VRHand_Disconnect", function(ply)
     if vrHands[ply] then
         for _, side in pairs(vrHands[ply]) do
@@ -186,7 +211,7 @@ hook.Add("PlayerDisconnected", "VRHand_Disconnect", function(ply)
 end)
 
 hook.Add("PreCleanupMap", "VRHand_PreCleanup", function()
-    for ply, _ in pairs(vrHands) do
+    for ply in pairs(vrHands) do
         RemoveVRHands(ply)
     end
 end)
@@ -212,6 +237,7 @@ hook.Add("Think", "VRHand_ThinkRespawn", function()
     end
 end)
 
+-- AVR mag hooks
 hook.Add("VRMod_Pickup", "VRHand_AVRMagPickup", function(ply, ent)
     if not IsValid(ent) or not string.match(ent:GetClass(), "avrmag_") then return end
     local hands = vrHands[ply]
