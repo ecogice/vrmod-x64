@@ -3,8 +3,9 @@ vrmod = vrmod or {}
 local EmptyHandsWeapons = {
     ["weapon_vrmod_empty"] = true,
     ["vr_spooderman"] = true,
-    -- add more here if needed
 }
+
+-- add more here if needed
 if SERVER then
     vrmod.HandVelocityCache = vrmod.HandVelocityCache or {}
     function vrmod.NetReceiveLimited(msgName, maxCountPerSec, maxLen, callback)
@@ -47,11 +48,12 @@ if SERVER then
     local function UpdateWorldPoses(ply, playerTable)
         if not IsValid(ply) or not playerTable then return end
         -- Only update if timestamp changed (or first time)
-        if not playerTable.latestFrameWorld or playerTable.latestFrameWorld.ts ~= playerTable.latestFrame.ts then
+        local lf = playerTable.latestFrame
+        if not lf then return end
+        -- Only update if timestamp changed (or first time)
+        if not playerTable.latestFrameWorld or playerTable.latestFrameWorld.ts ~= lf.ts then
             playerTable.latestFrameWorld = playerTable.latestFrameWorld or {}
-            local lf = playerTable.latestFrame
             local lfw = playerTable.latestFrameWorld
-            if not lf then return end
             -- Timestamp
             lfw.ts = lf.ts
             -- Base world reference (player position + vehicle angles if applicable)
