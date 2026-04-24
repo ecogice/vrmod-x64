@@ -683,13 +683,6 @@ g_VR.bindings_touch = [[
          "chords" : [
             {
                "inputs" : [
-                  [ "/user/hand/left/input/grip", "click" ],
-                  [ "/user/hand/right/input/joystick", "center" ]
-               ],
-               "output" : "/actions/driving/in/boolean_toggle_engine"
-            },
-            {
-               "inputs" : [
                   [ "/user/hand/right/input/grip", "click" ],
                   [ "/user/hand/right/input/joystick", "center" ]
                ],
@@ -705,16 +698,23 @@ g_VR.bindings_touch = [[
             {
                "inputs" : [
                   [ "/user/hand/left/input/grip", "click" ],
-                  [ "/user/hand/right/input/joystick", "west" ]
+                  [ "/user/hand/left/input/thumbrest", "touch" ]
                ],
                "output" : "/actions/driving/in/boolean_signal_left"
             },
             {
                "inputs" : [
-                  [ "/user/hand/left/input/grip", "click" ],
-                  [ "/user/hand/right/input/joystick", "east" ]
+                  [ "/user/hand/right/input/grip", "click" ],
+                  [ "/user/hand/right/input/thumbrest", "touch" ]
                ],
                "output" : "/actions/driving/in/boolean_signal_right"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/right/input/grip", "click" ],
+                  [ "/user/hand/left/input/y", "single" ]
+               ],
+               "output" : "/actions/driving/in/boolean_changeweapon"
             }
          ],
          "poses" : [],
@@ -796,7 +796,7 @@ g_VR.bindings_touch = [[
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/driving/in/boolean_handbrake"
+                     "output" : "/actions/driving/in/boolean_left_pickup"
                   }
                },
                "mode" : "trigger",
@@ -806,7 +806,7 @@ g_VR.bindings_touch = [[
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/driving/in/boolean_turret"
+                     "output" : "/actions/driving/in/boolean_right_pickup"
                   }
                },
                "mode" : "trigger",
@@ -815,9 +815,6 @@ g_VR.bindings_touch = [[
             },
             {
                "inputs" : {
-                  "center" : {
-                     "output" : "/actions/driving/in/boolean_shift_neutral"
-                  },
                   "east" : {
                      "output" : "/actions/driving/in/boolean_lights"
                   },
@@ -839,7 +836,7 @@ g_VR.bindings_touch = [[
             },
             {
                "inputs" : {},
-               "mode" : "toggle_button",
+               "mode" : "button",
                "parameters" : {},
                "path" : "/user/hand/left/input/thumbrest"
             },
@@ -848,6 +845,16 @@ g_VR.bindings_touch = [[
                "mode" : "button",
                "parameters" : {},
                "path" : "/user/hand/right/input/thumbrest"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_turret"
+                  }
+               },
+               "mode" : "joystick",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/joystick"
             }
          ]
       },
@@ -1013,6 +1020,16 @@ g_VR.bindings_touch = [[
                "mode" : "button",
                "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_left_primaryfire"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/trigger"
             }
          ]
       }
@@ -1025,6 +1042,7 @@ g_VR.bindings_touch = [[
    "options" : {},
    "simulated_actions" : []
 }
+
 
 
       
