@@ -1,7 +1,6 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
-
 function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     local xscale = projMatrix[1][1]
     local xoffset = projMatrix[1][3]
@@ -33,42 +32,38 @@ end
 function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
     local isWindows = system.IsWindows()
     local hFactor, vFactor = 0, 0
-    -- average half‐eye extents in tangent space
-    if renderOffse then
+    if renderOffset then
         local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
         local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
         hFactor = 0.5 / wAvg
         vFactor = 1.0 / hAvg
     else
-        --original calues
         hFactor = 0.25
         vFactor = 0.5
     end
 
     hFactor = hFactor * scaleFactor
     vFactor = vFactor * scaleFactor
-    -- UV origin flip only affects V‐range endpoints, not the offset sign:
+    local TEXTURE_INSET = 0.003
     local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
     local function calcVMinMax(offset)
         local adj = offset * vFactor
-        return vMin - adj, vMax - adj
+        if isWindows then
+            return (vMin + TEXTURE_INSET) - adj, (vMax - TEXTURE_INSET) - adj
+        else
+            return (vMin - TEXTURE_INSET) - adj, (vMax + TEXTURE_INSET) - adj
+        end
     end
 
-    -- U bounds
-    local uMinLeft = 0.0 + (leftCalc.HorizontalOffset + hOffset) * hFactor
-    local uMaxLeft = 0.5 + (leftCalc.HorizontalOffset + hOffset) * hFactor
-    local uMinRight = 0.5 + (rightCalc.HorizontalOffset + hOffset) * hFactor
-    local uMaxRight = 1.0 + (rightCalc.HorizontalOffset + hOffset) * hFactor
-    -- V bounds
+    -- U: outer only
+    local uMinLeft = 0.0 + TEXTURE_INSET + (leftCalc.HorizontalOffset + hOffset) * hFactor
+    local uMaxLeft = 0.5 + (leftCalc.HorizontalOffset + hOffset) * hFactor -- inner untouched
+    local uMinRight = 0.5 + (rightCalc.HorizontalOffset + hOffset) * hFactor -- inner untouched
+    local uMaxRight = 1.0 - TEXTURE_INSET + (rightCalc.HorizontalOffset + hOffset) * hFactor
+    -- V: symmetric top/bottom
     local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset + vOffset)
     local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset + vOffset)
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
-end
-
-function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
-    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
-    local hoffset = desktopView == 3 and 0.5 or 0
-    return vmargin, hoffset
 end
 
 function vrmod.utils.AdjustFOV(proj, fovScaleX, fovScaleY)

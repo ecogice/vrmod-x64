@@ -276,7 +276,7 @@ function VRUtilOpenMenu()
 
 		AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
 		y = y + 20
-		AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
+		AddCB("Auto offset (disable if having rendering issues)", "vrmod_renderoffset", y)
 		y = y + 20
 		AddCB("3D Skybox (disable for more FPS)", "vrmod_skybox", y)
 		do
