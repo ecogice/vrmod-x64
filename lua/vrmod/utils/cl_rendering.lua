@@ -29,6 +29,12 @@ function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     }
 end
 
+function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
+    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
+    local hoffset = desktopView == 3 and 0.5 or 0
+    return vmargin, hoffset
+end
+
 function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
     local isWindows = system.IsWindows()
     local hFactor, vFactor = 0, 0
