@@ -1,12 +1,13 @@
 if CLIENT then return end
 vrmod = vrmod or {}
 local vrHands = {}
-local handOwners = {} -- ent -> {ply, side}
+local handOwners = {}
+local lastAppliedWeapon = {}
 local function Log(msg, ...)
     vrmod.logger.Debug("[VRHand] " .. msg, ...)
 end
 
--- ==================== YOUR ORIGINAL WEAPON LOGIC ====================
+-- ==================== ORIGINAL WEAPON LOGIC ====================
 local function GetCachedWeaponParams(wep, ply, side)
     local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
     if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
@@ -45,7 +46,15 @@ end
 
 local function UpdateWeaponCollisionShape(ply, wep)
     if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-    Log("UpdateWeaponCollisionShape called for %s → %s", ply:Nick(), IsValid(wep) and wep:GetClass() or "nil")
+    local wepClass = IsValid(wep) and wep:GetClass() or "none"
+    local lastClass = lastAppliedWeapon[ply]
+    -- === KEY FIX: skip if we already applied this exact weapon ===
+    if lastClass == wepClass then
+        Log("Skipping re-apply for same weapon: %s", wepClass)
+        return
+    end
+
+    Log("UpdateWeaponCollisionShape called for %s → %s", ply:Nick(), wepClass)
     timer.Simple(0.1, function()
         if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
         local hands = vrHands[ply]
@@ -53,6 +62,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
         local right = hands.right
         local hand = right.ent
         if not vrmod.utils.IsValidWep(wep) then
+            lastAppliedWeapon[ply] = "none"
             timer.Simple(0, function() ApplySphere(hand, right, vrmod.DEFAULT_RADIUS) end)
             return
         end
@@ -63,6 +73,8 @@ local function UpdateWeaponCollisionShape(ply, wep)
             return
         end
 
+        -- Success → remember it so we never do this again for this weapon
+        lastAppliedWeapon[ply] = wepClass
         timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
     end)
 end

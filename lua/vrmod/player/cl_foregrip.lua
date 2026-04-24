@@ -1,13 +1,3 @@
---[[
-    vrmod_foregrip.lua
-    Superior Two-handed foregrip system for VRMod (integrated into core)
-
-    - Replaces and completely blocks the old broken vrmod_foregrip.lua / Universal ForeGrip addon
-    - Uses real weapon collision boxes from vrmod.utils (no guessing)
-    - Proper collision pushout via UpdateViewModelPos
-    - Natural two-hand guiding with box-aware limits
-    - Clean, optimized, x64 style
-]]
 if SERVER then return end
 -- ===================== BLOCK OLD BROKEN FOREGRIP ADDON =====================
 -- This completely disables the old vrmod_foregrip.lua and Universal ForeGrip addon
@@ -39,8 +29,8 @@ timer.Simple(0.5, BlockOldForegripAddon)
 timer.Simple(2, BlockOldForegripAddon)
 timer.Simple(10, BlockOldForegripAddon)
 -- ===================== CONFIG =====================
-local GRIP_DISTANCE = 17 -- Units to start grip (hand proximity)
-local GUIDE_BLEND = 0.18 -- 0 = pure right-hand (visual only), 0.15-0.25 = slight natural guiding
+local GRIP_DISTANCE = 12 -- Units to start grip (hand proximity)
+local GUIDE_BLEND = 0.45
 -- ===================== STATE =====================
 local state = {
     gripping = false,
@@ -49,6 +39,31 @@ local state = {
     lastWep = nil,
     weaponBox = nil, -- real collision box from vrmod.utils
 }
+
+local function GetCachedWeaponParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
+    if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
+    return radius, reach, mins, maxs, angles
+end
+
+local function UpdateWeaponCollisionShape(ply, wep)
+    timer.Simple(0.1, function()
+        if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        -- state.weaponBox shall be assigned **once** the values are properly computed
+        if radius and mins and maxs and angles and radius ~= vrmod.DEFAULT_RADIUS then
+            -- still not computed → schedule one fallback assignment
+            timer.Simple(0, function()
+                if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+                state.weaponBox = {
+                    mins = mins or Vector(-10, -10, -10),
+                    maxs = maxs or Vector(10, 10, 10),
+                    reach = reach or 20
+                }
+            end)
+        end
+    end)
+end
 
 -- ===================== HELPERS =====================
 local function IsValidForegripWeapon(wep)
@@ -89,7 +104,7 @@ local function GetGuidedWeaponPose(rightPos, rightAng, leftPos, leftAng, box)
     if GUIDE_BLEND <= 0 then return rightPos, rightAng end
     local toLeft = leftPos - rightPos
     local dist = toLeft:Length()
-    local maxDist = box and box.reach and box.reach * 1.35 or 26
+    local maxDist = box and box.reach and box.reach * 1.55 or 26
     if dist > maxDist then return rightPos, rightAng end
     local minDist = box and box.mins and math.max(math.abs(box.mins.y), 4.5) or 5.5
     if dist < minDist then return rightPos, rightAng end
@@ -109,24 +124,8 @@ hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
     if pressed and left.pos:Distance(right.pos) <= GRIP_DISTANCE and IsValidForegripWeapon(wep) and g_VR.currentvmi then
         state.gripping = true
         state.lastWep = wep
-        -- Use real weapon collision box from vrmod.utils
         state.weaponBox = nil
-        if vrmod.utils and IsValid(wep) then
-            local model = wep:GetModel() or ""
-            vrmod.utils.ComputePhysicsParams(model)
-            local radius, reach, actualMins, actualMaxs, _, isMelee = vrmod.utils.GetCachedWeaponParams(wep, LocalPlayer(), "right") or {}
-            if actualMins and actualMaxs then
-                state.weaponBox = {
-                    mins = actualMins,
-                    maxs = actualMaxs,
-                    reach = reach or 20,
-                    isMelee = isMelee or false
-                }
-
-                if vrmod.logger then vrmod.logger.Debug("Foregrip: Actual collision box for %s | Mins: %s, Maxs: %s | Melee: %s | Reach: %.1f", wep:GetClass(), tostring(actualMins), tostring(actualMaxs), tostring(isMelee), reach or 0) end
-            end
-        end
-
+        if IsValid(wep) then UpdateWeaponCollisionShape(LocalPlayer(), wep) end
         local wepWorldPos, wepWorldAng = LocalToWorld(g_VR.currentvmi.offsetPos or Vector(), g_VR.currentvmi.offsetAng or Angle(), right.pos, right.ang)
         state.offsetPos, state.offsetAng = WorldToLocal(left.pos, left.ang, wepWorldPos, wepWorldAng)
     else
@@ -148,7 +147,7 @@ hook.Add("VRMod_PreRender", "vrmod_foregrip", function()
     end
 
     -- Box-aware safety release
-    local maxDist = state.weaponBox and state.weaponBox.reach and state.weaponBox.reach * 1.35 or 26
+    local maxDist = state.weaponBox and state.weaponBox.reach and state.weaponBox.reach * 1.35 or 20
     if left.pos:Distance(right.pos) > maxDist then
         state.gripping = false
         return
