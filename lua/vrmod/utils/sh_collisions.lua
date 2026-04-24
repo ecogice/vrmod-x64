@@ -19,9 +19,22 @@ vrmod.modelCache = {}
 vrmod.collisionSpheres = {}
 vrmod.collisionBoxes = {}
 local pending = {}
-local lastLeftPos = Vector(0, 0, 0)
-local lastRightPos = Vector(0, 0, 0)
-local lastRightAng = Angle(0, 0, 0)
+local lastPreCheckLeft = Vector(0, 0, 0)
+local lastPreCheckRight = Vector(0, 0, 0)
+local lastPreCheckResult = false
+local PRECHECK_MOVE_THRESHOLD = 0.8 -- units (tune 0.5–2.0)
+local lastCheckedHandPos = {
+    left = Vector(),
+    right = Vector()
+}
+
+local POS_TOLERANCE = 0.05
+local ANG_TOLERANCE = 1.0
+local lastCheckedHandAng = {
+    left = Angle(),
+    right = Angle()
+}
+
 local lastNonClippedPos = {
     left = nil,
     right = nil
@@ -88,7 +101,7 @@ local function SphereCollidesWithWorld(pos, radius)
 
     if not tr.Hit or not tr.HitWorld then return false, Vector(0, 0, 1) end
     -- Second: iterative push-out (resolve penetration)
-    local maxIterations = 5
+    local maxIterations = 2
     local pushPos = pos
     local hitNormal = tr.HitNormal
     for _ = 1, maxIterations do
@@ -161,7 +174,7 @@ local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach)
 
         local boxSize = math.max(hullMaxs.x - hullMins.x, hullMaxs.y - hullMins.y, hullMaxs.z - hullMins.z) / 2
         pushPos = pos
-        local maxIterations = 5
+        local maxIterations = 2
         for _ = 1, maxIterations do
             local pushTrace = util.TraceHull({
                 start = pushPos,
@@ -471,13 +484,25 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     local ply = LocalPlayer()
     if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
         vrmod._collisionNearby = false
+        lastPreCheckResult = false
         return
     end
 
+    -- === MOVEMENT-BASED SKIP ===
+    local leftMoved = (leftPos - lastPreCheckLeft):LengthSqr() > PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
+    local rightMoved = (rightPos - lastPreCheckRight):LengthSqr() > PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
+    if not leftMoved and not rightMoved then
+        vrmod._collisionNearby = lastPreCheckResult
+        return
+    end
+
+    lastPreCheckLeft = leftPos
+    lastPreCheckRight = rightPos
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
     local leftNearby = SphereCollidesWithWorld(leftPos, 30)
     local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
-    vrmod._collisionNearby = leftNearby or rightNearby
+    lastPreCheckResult = leftNearby or rightNearby
+    vrmod._collisionNearby = lastPreCheckResult
 end
 
 function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
@@ -624,7 +649,6 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
 end
 
 function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos, righthandAng)
-    -- Early out if no collision broad-phase
     if not vrmod._collisionNearby then
         vrmod.collisionSpheres = {}
         vrmod.collisionBoxes = {}
@@ -646,9 +670,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     if not IsValid(ply) then return lefthandPos, lefthandAng, righthandPos, righthandAng end
     local wep = ply:GetActiveWeapon()
     if not vrmod.utils.IsValidWep(wep) then vrmod.collisionBoxes = {} end
-    -- Get climbing state
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    -- Offset positions
     local leftPos = lefthandPos + lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightPos = righthandPos + righthandAng:Forward() * vrmod.DEFAULT_OFFSET
     vrmod.collisionSpheres = {}
@@ -657,55 +679,66 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         right = nil
     }
 
-    vrmod._lastRelFrame = vrmod._lastRelFrame or {}
-    local POS_TOLERANCE = 0.05
-    local ANG_TOLERANCE = 1.0
-    -- LEFT HAND
+    -- ==================== LEFT HAND ====================
     if leftGrip then
         cachedPushOutPos.left = nil
         lastNonClippedPos.left = nil
         lastNonClippedNormal.left = nil
-        local hmdPos = g_VR.tracking.hmd.pos or Vector()
-        local yawAng = Angle(0, ply:InVehicle() and ply:EyeAngles().yaw or g_VR.characterYaw, 0)
-        local relPos, relAng = WorldToLocal(leftPos, lefthandAng, hmdPos, yawAng)
-        vrmod._lastRelFrame.left = {
-            pos = relPos,
-            ang = relAng
-        }
     else
-        local shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH)
-        vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-        vrmod._collisionShapeByHand.left = shape
-        if shape and shape.isClipped then
-            -- handle push-out
-            local corrected = shape.pushOutPos or leftPos
-            lefthandPos = corrected
-            cachedPushOutPos.left = corrected
+        local moved = (leftPos - lastCheckedHandPos.left):LengthSqr() > POS_TOLERANCE * POS_TOLERANCE or math.abs(lefthandAng.pitch - lastCheckedHandAng.left.pitch) > ANG_TOLERANCE or math.abs(lefthandAng.yaw - lastCheckedHandAng.left.yaw) > ANG_TOLERANCE
+        local shape
+        if moved then
+            shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH)
+            lastCheckedHandPos.left = leftPos
+            lastCheckedHandAng.left = lefthandAng
+        else
+            -- Reuse last known good push-out position instead of nil
+            shape = vrmod._lastGoodShapeLeft or vrmod._collisionShapeByHand.left
+        end
+
+        if shape and shape.isClipped and shape.pushOutPos then
+            lefthandPos = shape.pushOutPos
+            cachedPushOutPos.left = lefthandPos
             lastNonClippedNormal.left = shape.hitNormal
+            vrmod._lastGoodShapeLeft = shape -- store for next frame
+        else
+            vrmod._lastGoodShapeLeft = nil
+        end
+
+        if shape then
+            vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
+            vrmod._collisionShapeByHand.left = shape
         end
     end
 
-    -- RIGHT HAND
+    -- ==================== RIGHT HAND ====================
     if rightGrip then
         cachedPushOutPos.right = nil
         lastNonClippedPos.right = nil
         lastNonClippedNormal.right = nil
-        local hmdPos = g_VR.tracking.hmd.pos or Vector()
-        local yawAng = Angle(0, ply:InVehicle() and ply:EyeAngles().yaw or g_VR.characterYaw, 0)
-        local relPos, relAng = WorldToLocal(rightPos, righthandAng, hmdPos, yawAng)
-        vrmod._lastRelFrame.right = {
-            pos = relPos,
-            ang = relAng
-        }
     else
-        local shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH)
-        vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-        vrmod._collisionShapeByHand.right = shape
-        if shape and shape.isClipped then
-            local corrected = shape.pushOutPos or rightPos
-            righthandPos = corrected
-            cachedPushOutPos.right = corrected
+        local moved = (rightPos - lastCheckedHandPos.right):LengthSqr() > POS_TOLERANCE * POS_TOLERANCE or math.abs(righthandAng.pitch - lastCheckedHandAng.right.pitch) > ANG_TOLERANCE or math.abs(righthandAng.yaw - lastCheckedHandAng.right.yaw) > ANG_TOLERANCE
+        local shape
+        if moved then
+            shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH)
+            lastCheckedHandPos.right = rightPos
+            lastCheckedHandAng.right = righthandAng
+        else
+            shape = vrmod._lastGoodShapeRight or vrmod._collisionShapeByHand.right
+        end
+
+        if shape and shape.isClipped and shape.pushOutPos then
+            righthandPos = shape.pushOutPos
+            cachedPushOutPos.right = righthandPos
             lastNonClippedNormal.right = shape.hitNormal
+            vrmod._lastGoodShapeRight = shape
+        else
+            vrmod._lastGoodShapeRight = nil
+        end
+
+        if shape then
+            vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
+            vrmod._collisionShapeByHand.right = shape
         end
     end
     return lefthandPos, lefthandAng, righthandPos, righthandAng

@@ -27,6 +27,25 @@ if CLIENT then
 	local forwardOffset = nil
 	local convarOverrides = {}
 	local moduleFile
+	local COLLISION_FRAME_INTERVAL = 1 -- 1 = every frame (90 Hz), 2 = every other frame (~60 Hz effective)
+	local frameCounter = 0
+	local convarOverrides = {
+		cl_threaded_bone_setup = "1",
+		gmod_mcore_test = "1",
+		mat_queue_mode = "1",
+		mat_disable_bloom = "1",
+		mat_disable_fancy_blending = "1",
+		mat_disable_lightwarp = "1",
+		mat_disable_ps_patch = "1",
+		mat_motion_blur_enabled = "0",
+		mat_fastspecular = "0",
+		mat_reduceparticles = "1",
+		r_shadowrendertotexture = "0",
+		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
+		r_threaded_particles = "1",
+		r_queued_ropes = "1",
+	}
+
 	local wasPaused = false
 	if system.IsLinux() then
 		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
@@ -147,29 +166,16 @@ if CLIENT then
 				worldPose.pos = worldPose.pos + offsetWorldPos
 				worldPose.ang = offsetWorldAng
 			end
-
-			vrmod.logger.Debug("Updated tracking for %s: pos=%s ang=%s", k, tostring(worldPose.pos), tostring(worldPose.ang))
 		end
 
 		g_VR.sixPoints = g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot
 		hook.Call("VRMod_Tracking")
 	end
 
-	local function UpdateCollisionsAndWepPos()
-		if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils then
-			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
-			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			g_VR.tracking.pose_lefthand.pos = leftPos
-			g_VR.tracking.pose_lefthand.ang = leftAng
-			g_VR.tracking.pose_righthand.pos = rightPos
-			g_VR.tracking.pose_righthand.ang = rightAng
-			vrmod.utils.UpdateViewModelPos(rightPos, rightAng)
-		end
-	end
-
 	local function HandleInput()
-		g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
+		local input, changed = VRMOD_GetActions()
+		g_VR.input = input or {}
+		g_VR.changedInputs = type(changed) == "table" and changed or {}
 		for k, v in pairs(g_VR.changedInputs) do
 			hook.Call("VRMod_Input", nil, k, v)
 		end
@@ -235,6 +241,23 @@ if CLIENT then
 		g_VR.view.angles = finalAng
 	end
 
+	local function UpdateCollisionsAndWepPos()
+		-- === ALWAYS update viewmodel when right hand exists ===
+		if g_VR.tracking.pose_righthand then vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang) end
+		-- === Only do heavy collision work when both hands + utils are ready ===
+		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
+		frameCounter = frameCounter + 1
+		-- === PERFORMANCE WRAPPER ===
+		if frameCounter % COLLISION_FRAME_INTERVAL == 0 then
+			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+			g_VR.tracking.pose_lefthand.pos = leftPos
+			g_VR.tracking.pose_lefthand.ang = leftAng
+			g_VR.tracking.pose_righthand.pos = rightPos
+			g_VR.tracking.pose_righthand.ang = rightAng
+		end
+	end
+
 	local function PerformRenderViews()
 		local eyeScale = convars.vrmod_eyescale:GetFloat()
 		-- cache angles once per frame
@@ -243,12 +266,9 @@ if CLIENT then
 		local right = ang:Right()
 		local up = ang:Up()
 		-- only recompute offsets when needed
-		if not eyeOffset or not forwardOffset or not verticalOffset then
-			eyeOffset = ipd * g_VR.scale
-			forwardOffset = fwd * -(eyez * g_VR.scale)
-			verticalOffset = up * -2.1
-		end
-
+		eyeOffset = ipd * g_VR.scale -- scalar, can stay here
+		forwardOffset = fwd * -(eyez * g_VR.scale)
+		verticalOffset = up * -2.1
 		-- compute eye positions
 		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + right * -eyeOffset * eyeScale + verticalOffset
 		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + right * eyeOffset * eyeScale + verticalOffset
@@ -322,23 +342,6 @@ if CLIENT then
 
 	-- 2) Convar overrides for performance
 	local function OverridePerformanceConvars()
-		local convarOverrides = {
-			cl_threaded_bone_setup = "1",
-			gmod_mcore_test = "1",
-			mat_queue_mode = "1",
-			mat_disable_bloom = "1",
-			mat_disable_fancy_blending = "1",
-			mat_disable_lightwarp = "1",
-			mat_disable_ps_patch = "1",
-			mat_motion_blur_enabled = "0",
-			mat_fastspecular = "0",
-			mat_reduceparticles = "1",
-			r_shadowrendertotexture = "0",
-			r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
-			r_threaded_particles = "1",
-			r_queued_ropes = "1",
-		}
-
 		for cvar, val in pairs(convarOverrides) do
 			overrideConvar(cvar, val)
 		end
@@ -485,7 +488,10 @@ if CLIENT then
 			VRMOD_UpdatePosesAndActions()
 			UpdateTracking()
 			UpdateCollisionsAndWepPos()
-			HandleInput()
+			if g_VR.active and VRMOD_GetActions then -- extra safety
+				HandleInput()
+			end
+
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
 			PerformRenderViews()
