@@ -1,26 +1,63 @@
+--[[
+    vrmod_foregrip.lua
+    Superior Two-handed foregrip system for VRMod (integrated into core)
+
+    - Replaces and completely blocks the old broken vrmod_foregrip.lua / Universal ForeGrip addon
+    - Uses real weapon collision boxes from vrmod.utils (no guessing)
+    - Proper collision pushout via UpdateViewModelPos
+    - Natural two-hand guiding with box-aware limits
+    - Clean, optimized, x64 style
+]]
 if SERVER then return end
+-- ===================== BLOCK OLD BROKEN FOREGRIP ADDON =====================
+-- This completely disables the old vrmod_foregrip.lua and Universal ForeGrip addon
+local function BlockOldForegripAddon()
+    local blocked = false
+    -- Remove all old hooks
+    if hook.GetTable()["VRMod_Input"] and hook.GetTable()["VRMod_Input"]["Foregrip"] then
+        hook.Remove("VRMod_Input", "Foregrip")
+        blocked = true
+    end
+
+    if hook.GetTable()["VRMod_PreRender"] and hook.GetTable()["VRMod_PreRender"]["ForegripTransform"] then
+        hook.Remove("VRMod_PreRender", "ForegripTransform")
+        blocked = true
+    end
+
+    if hook.GetTable()["VRMod_Exit"] and hook.GetTable()["VRMod_Exit"]["ForegripExit"] then
+        hook.Remove("VRMod_Exit", "ForegripExit")
+        blocked = true
+    end
+
+    -- Remove old test command
+    if concommand.GetTable and concommand.GetTable()["vrmod_foregrip_test"] then concommand.Remove("vrmod_foregrip_test") end
+    if blocked and vrmod.logger then vrmod.logger.Warn("Delete Universal ForeGrip addon, vrmod now has a proper implementation") end
+end
+
+BlockOldForegripAddon()
+timer.Simple(0.5, BlockOldForegripAddon)
+timer.Simple(2, BlockOldForegripAddon)
+timer.Simple(10, BlockOldForegripAddon)
 -- ===================== CONFIG =====================
 local GRIP_DISTANCE = 17 -- Units to start grip (hand proximity)
 local GUIDE_BLEND = 0.18 -- 0 = pure right-hand (visual only), 0.15-0.25 = slight natural guiding
--- ==================================================
--- State (clean table, no polluting globals)
+-- ===================== STATE =====================
 local state = {
     gripping = false,
     offsetPos = Vector(),
     offsetAng = Angle(),
     lastWep = nil,
-    weaponBox = nil, -- {mins, maxs, reach, isMelee} from vrmod.utils
+    weaponBox = nil, -- real collision box from vrmod.utils
 }
 
 -- ===================== HELPERS =====================
 local function IsValidForegripWeapon(wep)
     if not IsValid(wep) then return false end
     local class = wep:GetClass():lower()
-    return not (string.find(class, "weapon_fists") or string.find(class, "arcticvr_") or class == "weapon_vrmod_empty" or class == "weapon_physgun")
+    return not (string.find(class, "weapon_fists") or string.find(class, "arcticvr_") or class == "weapon_vrmod_empty")
 end
 
--- Official viewmodel position updater (from vrmod.utils)
--- Updated for two-hand grip compatibility (forces update + uses guided pose)
+-- Official viewmodel updater with collision support (from vrmod.utils)
 local function UpdateViewModelPos(pos, ang, override)
     local ply = LocalPlayer()
     if vrmod.suppressViewModelUpdates and not override then
@@ -47,22 +84,17 @@ local function UpdateViewModelPos(pos, ang, override)
     end
 end
 
--- Core two-handed pose calculation with slight guiding
--- Uses REAL weapon collision box from vrmod.utils (no magic numbers)
+-- Two-handed pose with real weapon collision box awareness
 local function GetGuidedWeaponPose(rightPos, rightAng, leftPos, leftAng, box)
     if GUIDE_BLEND <= 0 then return rightPos, rightAng end
     local toLeft = leftPos - rightPos
     local dist = toLeft:Length()
-    -- Dynamic limits from actual weapon collision box (fallback to sensible defaults)
     local maxDist = box and box.reach and box.reach * 1.35 or 26
     if dist > maxDist then return rightPos, rightAng end
-    -- Minimum sensible distance (based on weapon width, prevents weird close-hand blending)
     local minDist = box and box.mins and math.max(math.abs(box.mins.y), 4.5) or 5.5
     if dist < minDist then return rightPos, rightAng end
     local targetAng = toLeft:GetNormalized():Angle()
-    -- Blend right-hand orientation with left-hand direction (foregrip pull)
     local newAng = LerpAngle(GUIDE_BLEND, rightAng, targetAng)
-    -- Keep right-hand roll for natural weapon twist/feel
     newAng.r = rightAng.r
     return rightPos, newAng
 end
@@ -77,11 +109,11 @@ hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
     if pressed and left.pos:Distance(right.pos) <= GRIP_DISTANCE and IsValidForegripWeapon(wep) and g_VR.currentvmi then
         state.gripping = true
         state.lastWep = wep
-        -- === USE ACTUAL WEAPON COLLISION BOX FROM vrmod.utils (no guessing) ===
+        -- Use real weapon collision box from vrmod.utils
         state.weaponBox = nil
         if vrmod.utils and IsValid(wep) then
             local model = wep:GetModel() or ""
-            vrmod.utils.ComputePhysicsParams(model) -- trigger real AABB if not cached
+            vrmod.utils.ComputePhysicsParams(model)
             local radius, reach, actualMins, actualMaxs, _, isMelee = vrmod.utils.GetCachedWeaponParams(wep, LocalPlayer(), "right") or {}
             if actualMins and actualMaxs then
                 state.weaponBox = {
@@ -95,16 +127,14 @@ hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
             end
         end
 
-        -- Weapon world position at moment of grip (right hand + viewmodel offset)
         local wepWorldPos, wepWorldAng = LocalToWorld(g_VR.currentvmi.offsetPos or Vector(), g_VR.currentvmi.offsetAng or Angle(), right.pos, right.ang)
-        -- Store left hand's relative position/angle to weapon
         state.offsetPos, state.offsetAng = WorldToLocal(left.pos, left.ang, wepWorldPos, wepWorldAng)
     else
         state.gripping = false
     end
 end)
 
-hook.Add("VRMod_PreRender", "vrmod_foregrip_x64", function()
+hook.Add("VRMod_PreRender", "vrmod_foregrip", function()
     if not state.gripping or not g_VR.currentvmi then
         state.gripping = false
         return
@@ -117,21 +147,20 @@ hook.Add("VRMod_PreRender", "vrmod_foregrip_x64", function()
         return
     end
 
-    -- Safety: release if hands drift too far (uses real weapon reach from collision box)
+    -- Box-aware safety release
     local maxDist = state.weaponBox and state.weaponBox.reach and state.weaponBox.reach * 1.35 or 26
     if left.pos:Distance(right.pos) > maxDist then
         state.gripping = false
         return
     end
 
-    -- Calculate weapon pose with slight left-hand guiding influence (box-aware)
     local guidedPos, guidedAng = GetGuidedWeaponPose(right.pos, right.ang, left.pos, left.ang, state.weaponBox)
-    -- Use the (local + utils) viewmodel updater for proper collision handling
-    UpdateViewModelPos(guidedPos, guidedAng, true) -- override=true forces update during two-hand grip
-    -- Where the left hand should visually attach (relative to the (possibly collision-corrected) viewmodel pose)
+    -- Proper viewmodel update with collision handling
+    UpdateViewModelPos(guidedPos, guidedAng, true)
+    -- Attach left hand to weapon
     local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, g_VR.viewModelPos, g_VR.viewModelAng)
     vrmod.SetLeftHandPose(attachPos, attachAng)
-    -- Network sync (for other players to see your left hand on the gun)
+    -- Network sync
     local netData = g_VR.net and g_VR.net[LocalPlayer():SteamID()]
     if netData and netData.lerpedFrame then
         netData.lerpedFrame.lefthandPos = attachPos
