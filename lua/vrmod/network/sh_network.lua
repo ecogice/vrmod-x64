@@ -530,6 +530,7 @@ if SERVER then
 			net.Start("vrutil_net_entervehicle", true)
 			net.Send(ply)
 			ply:SetAllowWeaponsInVehicle(1)
+			vrmod.SetVRHandsNoCollide(ply, true)
 		end
 	end)
 
@@ -537,6 +538,7 @@ if SERVER then
 		if g_VR[ply:SteamID()] ~= nil then
 			net.Start("vrutil_net_exitvehicle", true)
 			net.Send(ply)
+			timer.Simple(1, function() if IsValid(ply) and vrmod.IsPlayerInVR(ply) and not ply:InVehicle() then vrmod.SetVRHandsNoCollide(ply, false) end end)
 		end
 	end)
 end

@@ -1,5 +1,7 @@
 if CLIENT then return end
+vrmod = vrmod or {}
 local vrHands = {}
+local handOwners = {} -- ent -> {ply, side}
 local function Log(msg, ...)
     vrmod.logger.Debug("[VRHand] " .. msg, ...)
 end
@@ -79,10 +81,14 @@ local function SpawnVRHands(ply)
             hand:SetModel("models/hunter/plates/plate.mdl")
             hand:SetPos(ply:GetPos())
             hand:Spawn()
+            -- ==================== DISABLE ALL EFFECTS / SOUNDS ====================
             hand:SetNoDraw(true)
             hand:DrawShadow(false)
+            hand:SetRenderMode(RENDERMODE_NONE)
             hand:SetNWBool("isVRHand", true)
+            -- No particles, no impact sounds, no break sounds, no gibs
             hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
+            hand:SetCustomCollisionCheck(true) -- Required for ShouldCollide hook
             local radius = 2.8
             hand:PhysicsInitSphere(radius, "metal")
             hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
@@ -92,14 +98,20 @@ local function SpawnVRHands(ply)
                 phys:SetMass(70)
                 hands[side] = {
                     ent = hand,
-                    phys = phys
+                    phys = phys,
+                    owner = ply,
+                    side = side
                 }
 
-                -- Realistic velocity push on actual collision
+                handOwners[hand] = {
+                    ply = ply,
+                    side = side
+                }
+
+                -- Realistic velocity push on actual collision (kept - this is collision behavior)
                 hand:AddCallback("PhysicsCollide", function(ent, data)
                     local hit = data.HitEntity
                     if not IsValid(hit) or hit:GetClass() ~= "prop_physics" then return end
-                    -- Safe real relative velocity
                     local speed = 80
                     if side == "right" then
                         local vel = vrmod.GetRightHandVelocityRelative and vrmod.GetRightHandVelocityRelative(ply)
@@ -119,7 +131,7 @@ local function SpawnVRHands(ply)
                     end
                 end)
 
-                Log("%s hand created", side)
+                Log("%s hand created (effects disabled)", side)
             else
                 hand:Remove()
             end
@@ -139,9 +151,24 @@ local function RemoveVRHands(ply)
     local hands = vrHands[ply]
     if not hands then return end
     for _, data in pairs(hands) do
-        if IsValid(data.ent) then data.ent:Remove() end
+        if IsValid(data.ent) then
+            handOwners[data.ent] = nil
+            data.ent:Remove()
+        end
     end
+
+    vrHands[ply] = nil
 end
+
+-- ==================== PREVENT HANDS FROM COLLIDING WITH EACH OTHER ====================
+hook.Add("ShouldCollide", "VRHand_PreventSelfCollision", function(ent1, ent2)
+    if not IsValid(ent1) or not IsValid(ent2) then return end
+    local o1 = handOwners[ent1]
+    local o2 = handOwners[ent2]
+    if o1 and o2 and o1.ply == o2.ply then
+        return false -- Same player's left + right hand = no collision
+    end
+end)
 
 -- ==================== SHADOW CONTROL IN THINK ====================
 hook.Add("Think", "VRHand_PhysicsSync", function()
@@ -200,18 +227,14 @@ hook.Add("VRMod_Start", "VRHand_VRStart", SpawnVRHands)
 hook.Add("PlayerSpawn", "VRHand_PlayerSpawn", function(ply) if vrmod.IsPlayerInVR(ply) then timer.Simple(0.1, function() SpawnVRHands(ply) end) end end)
 hook.Add("PlayerDeath", "VRHand_PlayerDeath", RemoveVRHands)
 hook.Add("VRMod_Exit", "VRHand_VREnd", RemoveVRHands)
-hook.Add("PlayerDisconnected", "VRHand_Disconnect", function(ply)
-    if vrHands[ply] then
-        for _, side in pairs(vrHands[ply]) do
-            if IsValid(side.ent) then side.ent:Remove() end
-        end
-
-        vrHands[ply] = nil
-    end
-end)
-
+hook.Add("PlayerDisconnected", "VRHand_Disconnect", function(ply) RemoveVRHands(ply) end)
 hook.Add("PreCleanupMap", "VRHand_PreCleanup", function()
+    local plys = {}
     for ply in pairs(vrHands) do
+        table.insert(plys, ply)
+    end
+
+    for _, ply in ipairs(plys) do
         RemoveVRHands(ply)
     end
 end)
@@ -249,3 +272,51 @@ hook.Add("VRMod_Drop", "VRHand_AVRMagDrop", function(ply, ent)
     local hands = vrHands[ply]
     if hands and hands.left and IsValid(hands.left.ent) then hands.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
+
+-- ==================== Damage redirect for VR hands ====================
+hook.Add("EntityTakeDamage", "VRHand_BulletRedirect", function(ent, dmginfo)
+    if not IsValid(ent) then return end
+    local data = handOwners[ent]
+    if not data or not IsValid(data.ply) then return end
+    local ply = data.ply
+    local bLeft = data.side == "left"
+    local dmgType = dmginfo:GetDamageType()
+    local attacker = dmginfo:GetAttacker()
+    local damage = dmginfo:GetDamage()
+    if damage <= 0 then return end
+    local playerDamage = damage * 0.45
+    if ply:Alive() then
+        local newDmg = DamageInfo()
+        newDmg:SetDamage(playerDamage)
+        newDmg:SetAttacker(attacker or game.GetWorld())
+        newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
+        newDmg:SetDamageType(dmgType)
+        newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
+        newDmg:SetDamageForce(dmginfo:GetDamageForce() * 0.45)
+        ply:TakeDamageInfo(newDmg)
+        Log("VR hand damaged → applied %.2f damage (45%% of %.2f) to player %s (%s hand)", playerDamage, damage, ply:Nick(), data.side)
+    end
+
+    if vrmod and type(vrmod.Drop) == "function" then
+        local steamid = ply:SteamID()
+        vrmod.Drop(steamid, bLeft)
+        Log("Called vrmod.Drop(steamid=%s, bLeft=%s) because %s hand was shot", steamid, tostring(bLeft), data.side)
+    end
+
+    dmginfo:SetDamage(0)
+    dmginfo:ScaleDamage(0)
+    return true
+end)
+
+-- ==================== VEHICLE COLLISION HANDLING ====================
+function vrmod.SetVRHandsNoCollide(ply, noCollide)
+    if not IsValid(ply) or not vrHands[ply] then return end
+    local group = noCollide and COLLISION_GROUP_IN_VEHICLE or COLLISION_GROUP_WEAPON
+    for _, side in ipairs({"left", "right"}) do
+        local handData = vrHands[ply][side]
+        if handData and IsValid(handData.ent) then
+            handData.ent:SetCollisionGroup(group)
+            Log("SetVRHandsNoCollide → %s hand = %s", side, noCollide and "NO COLLIDE" or "NORMAL")
+        end
+    end
+end
