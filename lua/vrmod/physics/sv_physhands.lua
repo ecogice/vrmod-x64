@@ -86,9 +86,8 @@ local function SpawnVRHands(ply)
             hand:DrawShadow(false)
             hand:SetRenderMode(RENDERMODE_NONE)
             hand:SetNWBool("isVRHand", true)
-            -- No particles, no impact sounds, no break sounds, no gibs
             hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
-            hand:SetCustomCollisionCheck(true) -- Required for ShouldCollide hook
+            hand:SetCustomCollisionCheck(true)
             local radius = 2.8
             hand:PhysicsInitSphere(radius, "metal")
             hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
@@ -108,7 +107,7 @@ local function SpawnVRHands(ply)
                     side = side
                 }
 
-                -- Realistic velocity push on actual collision (kept - this is collision behavior)
+                -- Realistic velocity push on actual collision
                 hand:AddCallback("PhysicsCollide", function(ent, data)
                     local hit = data.HitEntity
                     if not IsValid(hit) or hit:GetClass() ~= "prop_physics" then return end
@@ -165,9 +164,7 @@ hook.Add("ShouldCollide", "VRHand_PreventSelfCollision", function(ent1, ent2)
     if not IsValid(ent1) or not IsValid(ent2) then return end
     local o1 = handOwners[ent1]
     local o2 = handOwners[ent2]
-    if o1 and o2 and o1.ply == o2.ply then
-        return false -- Same player's left + right hand = no collision
-    end
+    if o1 and o2 and o1.ply == o2.ply then return false end
 end)
 
 -- ==================== SHADOW CONTROL IN THINK ====================
@@ -273,7 +270,7 @@ hook.Add("VRMod_Drop", "VRHand_AVRMagDrop", function(ply, ent)
     if hands and hands.left and IsValid(hands.left.ent) then hands.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
 
--- ==================== Damage redirect for VR hands ====================
+-- ==================== Damage redirect for VR hands (with self-punch prevention) ====================
 hook.Add("EntityTakeDamage", "VRHand_BulletRedirect", function(ent, dmginfo)
     if not IsValid(ent) then return end
     local data = handOwners[ent]
@@ -284,6 +281,18 @@ hook.Add("EntityTakeDamage", "VRHand_BulletRedirect", function(ent, dmginfo)
     local attacker = dmginfo:GetAttacker()
     local damage = dmginfo:GetDamage()
     if damage <= 0 then return end
+    -- ==================== SELF-PUNCH PREVENTION ====================
+    local isSelfDamage = IsValid(attacker) and attacker == ply
+    local isBulletDamage = bit.band(dmgType, DMG_BULLET) ~= 0 or bit.band(dmgType, DMG_BUCKSHOT) ~= 0
+    if isSelfDamage and not isBulletDamage then
+        -- Player punched themselves → prevent damage to player, no drop
+        dmginfo:SetDamage(0)
+        dmginfo:ScaleDamage(0)
+        Log("Self-punch prevented on %s hand of %s", data.side, ply:Nick())
+        return true
+    end
+
+    -- Normal case: external damage or self-shoot (bullet) → redirect 45% to player + drop
     local playerDamage = damage * 0.45
     if ply:Alive() then
         local newDmg = DamageInfo()
@@ -300,7 +309,7 @@ hook.Add("EntityTakeDamage", "VRHand_BulletRedirect", function(ent, dmginfo)
     if vrmod and type(vrmod.Drop) == "function" then
         local steamid = ply:SteamID()
         vrmod.Drop(steamid, bLeft)
-        Log("Called vrmod.Drop(steamid=%s, bLeft=%s) because %s hand was shot", steamid, tostring(bLeft), data.side)
+        Log("Called vrmod.Drop(steamid=%s, bLeft=%s) because %s hand was hit", steamid, tostring(bLeft), data.side)
     end
 
     dmginfo:SetDamage(0)
