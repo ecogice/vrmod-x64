@@ -29,6 +29,8 @@ if CLIENT then
 	local moduleFile
 	local COLLISION_FRAME_INTERVAL = 1 -- 1 = every frame (90 Hz), 2 = every other frame (~60 Hz effective)
 	local frameCounter = 0
+	local prevRawHeadPos = Vector(0, 0, 0)
+	local prevRawHeadTime = 0
 	local convarOverrides = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
@@ -155,6 +157,27 @@ if CLIENT then
 				worldPose.ang = ang
 			end
 
+			-- === NEW: Head velocity from RAW pose (fixes gamepad locomotion bug) ===
+			if k == "hmd" then
+				local now = CurTime()
+				if prevRawHeadTime > 0 then
+					local dt = now - prevRawHeadTime
+					if dt > 0 then
+						local rawDelta = currentPos - prevRawHeadPos
+						local rawVel = rawDelta / dt
+						vrmod.cachedHeadPose.vel = LocalToWorld(rawVel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
+						if v.angvel then
+							local rawAngVel = Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll)
+							vrmod.cachedHeadPose.angvel = LocalToWorld(rawAngVel, Angle(0, 0, 0), vector_origin, g_VR.originAngle)
+						end
+					end
+				end
+
+				prevRawHeadPos = currentPos
+				prevRawHeadTime = now
+			end
+
+			-- =====================================================================
 			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
 			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), vector_origin, g_VR.originAngle)
 			local isRight = k == "pose_righthand"

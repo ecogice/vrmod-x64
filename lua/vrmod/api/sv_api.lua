@@ -256,6 +256,11 @@ if SERVER then
         return cache and cache.hmdAngVel or Angle()
     end
 
+    function vrmod.GetHMDVelocityRelative(ply)
+        if not IsValid(ply) then return Vector() end
+        return vrmod.GetHMDVelocity(ply) - ply:GetVelocity()
+    end
+
     -- Left hand
     function vrmod.GetLeftHandPos(ply)
         if not IsValid(ply) then return Vector() end
@@ -289,7 +294,7 @@ if SERVER then
             UpdateWorldPoses(ply, g_VR[sid])
             cache = vrmod.HandVelocityCache[sid]
         end
-        return cache and cache.leftVel or Vector()
+        return cache and cache.lefthandVel or Vector()
     end
 
     function vrmod.GetLeftHandAngularVelocity(ply)
@@ -300,7 +305,7 @@ if SERVER then
             UpdateWorldPoses(ply, g_VR[sid])
             cache = vrmod.HandVelocityCache[sid]
         end
-        return cache and cache.leftAngVel or Angle()
+        return cache and cache.lefthandAngVel or Angle()
     end
 
     function vrmod.GetLeftHandVelocityRelative(ply)
@@ -346,7 +351,7 @@ if SERVER then
             UpdateWorldPoses(ply, g_VR[sid])
             cache = vrmod.HandVelocityCache[sid]
         end
-        return cache and cache.rightVel or Vector()
+        return cache and cache.righthandVel or Vector()
     end
 
     function vrmod.GetRightHandAngularVelocity(ply)
@@ -357,7 +362,7 @@ if SERVER then
             UpdateWorldPoses(ply, g_VR[sid])
             cache = vrmod.HandVelocityCache[sid]
         end
-        return cache and cache.rightAngVel or Angle()
+        return cache and cache.righthandAngVel or Angle()
     end
 
     function vrmod.GetRightHandVelocityRelative(ply)
