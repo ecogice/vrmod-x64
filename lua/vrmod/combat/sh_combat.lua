@@ -8,9 +8,10 @@ local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.5", FCV
 local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "3", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
--- Updated impactSounds with verified sound paths
+-- Updated impactSounds with verified sound paths + head punch sounds (fist-like)
 local impactSounds = {
     fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
+    head = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
     blunt = {"physics/metal/metal_box_impact_hard1.wav", "physics/metal/metal_box_impact_hard2.wav", "physics/metal/metal_box_impact_hard3.wav"},
     stunstick = {"weapons/stunstick/stunstick_impact1.wav", "weapons/stunstick/stunstick_impact2.wav", "weapons/stunstick/stunstick_fleshhit1.wav", "weapons/stunstick/stunstick_fleshhit2.wav"},
     sharp = {"physics/flesh/flesh_squishy_impact_hard1.wav", "physics/flesh/flesh_squishy_impact_hard2.wav", "weapons/knife/knife_hit1.wav", "weapons/knife/knife_hit2.wav"},
@@ -81,7 +82,13 @@ if CLIENT then
             end
 
             -- Determine impact type AFTER everything else
-            local impactType = hand == "right" and useWeapon and "blunt" or "fist"
+            local impactType = "fist"
+            if hand == "right" and useWeapon then
+                impactType = "blunt"
+            elseif hand == "head" then
+                impactType = "head"
+            end
+
             -- **Finally** send the melee attack
             SendMeleeAttack(tr.HitPos, dir, params.radius, params.reach, params.mins, params.maxs, params.ang, impactType, hand)
         end
@@ -125,14 +132,37 @@ if CLIENT then
             pos = rightPos
         }
 
+        -- Precompute head (headbutt / head punch) - short reach, small radius, forward from HMD
+        local headAng = vrmod.GetHMDAng(ply)
+        local headPos = vrmod.GetHMDPos(ply) + headAng:Forward() * 5
+        local headRadius = 6
+        local headReach = 6
+        local headMins = Vector(-headRadius, -headRadius, -headRadius)
+        local headMaxs = Vector(headRadius, headRadius, headRadius)
+        PrecomputedMelee.head = {
+            radius = headRadius,
+            reach = headReach,
+            mins = headMins,
+            maxs = headMaxs,
+            ang = headAng,
+            dir = headAng:Forward(),
+            useWeapon = false,
+            pos = headPos
+        }
+
         -- Threshold check (velocity-based) happens **after** precomputation
-        local leftVel = vrmod.GetLeftHandVelocityRelative() or Vector(0, 0, 0)
-        local rightVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
+        local leftVel = vrmod.GetLeftHandVelocityRelative()
+        local rightVel = vrmod.GetRightHandVelocityRelative()
+        local headVel = vrmod.GetHMDVelocity()
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
-        if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
-        -- Try melee for both hands
+        local headForwardSpeed = headVel:Length()
+        print(headVel)
+        local headThreshold = threshold * 0.5 -- higher threshold so normal head bobbing / small movements don't cause constant punching when standing still
+        if leftVel:Length() < threshold and rightVel:Length() < threshold and headForwardSpeed < headThreshold then return end
+        -- Try melee for both hands + head
         if not g_VR.cooldownLeft then TryMelee(PrecomputedMelee.left, "left") end
         if not g_VR.cooldownRight then TryMelee(PrecomputedMelee.right, "right") end
+        if not g_VR.cooldownHead then TryMelee(PrecomputedMelee.head, "head") end
     end)
 end
 
@@ -154,8 +184,12 @@ if SERVER then
         local swingSpeed
         if hand == "left" then
             swingSpeed = vrmod.GetLeftHandVelocityRelative(ply)
-        else
+        elseif hand == "right" then
             swingSpeed = vrmod.GetRightHandVelocityRelative(ply)
+        elseif hand == "head" then
+            swingSpeed = vrmod.GetHMDVelocity(ply)
+        else
+            swingSpeed = Vector(0, 0, 0)
         end
 
         if swingSpeed then swingSpeed = swingSpeed:Length() end
@@ -218,6 +252,9 @@ if SERVER then
         elseif impactType == "explosive" then
             damageMultiplier = 2.5
             damageType = bit.bor(DMG_BLAST, DMG_CLUB)
+        elseif impactType == "head" then
+            damageMultiplier = 1.15
+            damageType = DMG_CLUB
         end
 
         local speedFactor = math.min(5.0, 1.0 + relativeSpeed * speedScale)
@@ -285,6 +322,9 @@ if SERVER then
             elseif customImpactType == "explosive" then
                 customDamageMultiplier = customDamageMultiplier or 2.5
                 customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
+            elseif customImpactType == "head" then
+                customDamageMultiplier = customDamageMultiplier or 1.5
+                customDamageType = DMG_CLUB
             else
                 customDamageMultiplier = customDamageMultiplier or 1.0
                 customDamageType = DMG_CLUB
