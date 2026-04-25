@@ -55,7 +55,7 @@ hook.Add("VRMod_Input", "teleport", function(action, pressed)
 						local tr = util.TraceLine({
 							start = prevPos,
 							endpos = prevPos + v,
-							filter = function(ent) return ent ~= LocalPlayer() and not ent:GetNWBool("IsVRHand", false) end,
+							filter = function(ent) return ent ~= LocalPlayer() and not ent:GetNWBool("isVRProxy", false) end,
 							mask = MASK_PLAYERSOLID
 						})
 

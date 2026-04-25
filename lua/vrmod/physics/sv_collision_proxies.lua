@@ -1,0 +1,368 @@
+if CLIENT then return end
+vrmod = vrmod or {}
+local vrProxies = {}
+local proxyOwners = {}
+local lastAppliedWeapon = {}
+-- ==================== TEMP DEBUG VISIBILITY ====================
+local DEBUG_VISIBLE_PROXIES = false -- set to false when done
+local function Log(msg, ...)
+    vrmod.logger.Debug("[VRProxy] " .. msg, ...)
+end
+
+-- ==================== ORIGINAL WEAPON LOGIC (unchanged) ====================
+local function GetCachedWeaponParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
+    if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
+    return radius, reach, mins, maxs, angles
+end
+
+local function ApplySphere(proxyEnt, proxyData, radius)
+    if not IsValid(proxyEnt) then return end
+    Log("ApplySphere radius=%.2f", radius)
+    proxyEnt:PhysicsInitSphere(radius, "metal")
+    proxyEnt:SetSolid(SOLID_VPHYSICS)
+    proxyEnt:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
+    proxyEnt:Activate()
+    local phys = proxyEnt:GetPhysicsObject()
+    if IsValid(phys) then
+        phys:SetMass(70)
+        proxyData.phys = phys
+        Log("ApplySphere SUCCESS")
+    end
+end
+
+local function ApplyBox(proxyEnt, proxyData, mins, maxs, angles)
+    if not IsValid(proxyEnt) then return end
+    Log("ApplyBox mins=%s maxs=%s", tostring(mins), tostring(maxs))
+    if angles then proxyEnt:SetAngles(angles) end
+    proxyEnt:PhysicsInitBox(mins, maxs)
+    proxyEnt:SetSolid(SOLID_VPHYSICS)
+    proxyEnt:Activate()
+    local phys = proxyEnt:GetPhysicsObject()
+    if IsValid(phys) then
+        phys:SetMass(70)
+        proxyData.phys = phys
+        Log("ApplyBox SUCCESS")
+    end
+end
+
+local function UpdateWeaponCollisionShape(ply, wep)
+    if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+    local wepClass = IsValid(wep) and wep:GetClass() or "none"
+    local lastClass = lastAppliedWeapon[ply]
+    if lastClass == wepClass then
+        Log("Skipping re-apply for same weapon: %s", wepClass)
+        return
+    end
+
+    Log("UpdateWeaponCollisionShape called for %s → %s", ply:Nick(), wepClass)
+    timer.Simple(0.1, function()
+        if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+        local proxies = vrProxies[ply]
+        if not proxies or not proxies.right or not IsValid(proxies.right.ent) then return end
+        local right = proxies.right
+        local proxyEnt = right.ent
+        if not vrmod.utils.IsValidWep(wep) then
+            lastAppliedWeapon[ply] = "none"
+            timer.Simple(0, function() ApplySphere(proxyEnt, right, vrmod.DEFAULT_RADIUS) end)
+            return
+        end
+
+        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        if not radius or not mins or not maxs or not angles or radius == vrmod.DEFAULT_RADIUS then
+            timer.Simple(0.5, function() UpdateWeaponCollisionShape(ply, wep) end)
+            return
+        end
+
+        lastAppliedWeapon[ply] = wepClass
+        timer.Simple(0, function() ApplyBox(proxyEnt, right, mins, maxs, angles) end)
+    end)
+end
+
+-- ==================== SPAWN ====================
+local function SpawnVRProxies(ply)
+    if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then return end
+    if vrProxies[ply] and vrProxies[ply].head and IsValid(vrProxies[ply].head.ent) and vrProxies[ply].left and IsValid(vrProxies[ply].left.ent) and vrProxies[ply].right and IsValid(vrProxies[ply].right.ent) then return end
+    if not vrProxies[ply] then vrProxies[ply] = {} end
+    local proxies = vrProxies[ply]
+    Log("SpawnVRProxies started for %s", ply:Nick())
+    for _, part in ipairs({"head", "left", "right"}) do
+        timer.Simple(0, function()
+            if proxies[part] and IsValid(proxies[part].ent) then return end
+            local proxy = ents.Create("prop_physics")
+            if not IsValid(proxy) then return end
+            proxy:SetModel("models/hunter/plates/plate.mdl")
+            proxy:SetPos(ply:GetPos())
+            proxy:Spawn()
+            if DEBUG_VISIBLE_PROXIES then
+                proxy:SetNoDraw(false)
+                proxy:DrawShadow(true)
+                proxy:SetRenderMode(RENDERMODE_NORMAL)
+                if part == "head" then
+                    proxy:SetModelScale(3.5) -- halved size
+                    proxy:SetColor(Color(255, 0, 0, 150))
+                    proxy:SetMaterial("models/debug/debugwhite")
+                end
+            else
+                proxy:SetNoDraw(true)
+                proxy:DrawShadow(false)
+                proxy:SetRenderMode(RENDERMODE_NONE)
+            end
+
+            proxy:SetNWBool("isVRProxy", true)
+            proxy:SetCollisionGroup(COLLISION_GROUP_WEAPON)
+            proxy:SetCustomCollisionCheck(true)
+            proxies[part] = {
+                ent = proxy,
+                phys = nil,
+                owner = ply,
+                part = part
+            }
+
+            proxyOwners[proxy] = {
+                ply = ply,
+                part = part
+            }
+
+            local radius = part == "head" and 3.2 or 3.0
+            ApplySphere(proxy, proxies[part], radius)
+            proxy:AddCallback("PhysicsCollide", function(ent, data)
+                local hit = data.HitEntity
+                if not IsValid(hit) or hit:GetClass() ~= "prop_physics" then return end
+                local speed = 80
+                if part == "head" then
+                    local vel = vrmod.GetHMDVelocity and vrmod.GetHMDVelocity(ply)
+                    if vel then speed = vel:Length() end
+                elseif part == "right" then
+                    local vel = vrmod.GetRightHandVelocityRelative and vrmod.GetRightHandVelocity(ply)
+                    if vel then speed = vel:Length() end
+                else
+                    local vel = vrmod.GetLeftHandVelocityRelative and vrmod.GetLeftHandVelocity(ply)
+                    if vel then speed = vel:Length() end
+                end
+
+                if speed > 35 then
+                    local physHit = hit:GetPhysicsObject()
+                    if IsValid(physHit) then
+                        local pushDir = data.HitNormal * -1
+                        physHit:ApplyForceCenter(pushDir * speed * 14.0)
+                        Log("PHYSICS PUSH %s → prop | Speed: %.1f", part, speed)
+                    end
+                end
+            end)
+
+            Log("%s proxy created via ApplySphere (effects disabled)", part)
+        end)
+    end
+
+    timer.Simple(0.2, function()
+        if proxies.right and IsValid(proxies.right.ent) then
+            local wep = ply:GetActiveWeapon()
+            if vrmod.utils.IsValidWep(wep) then UpdateWeaponCollisionShape(ply, wep) end
+        end
+    end)
+end
+
+local function RemoveVRProxies(ply)
+    if not IsValid(ply) then return end
+    local proxies = vrProxies[ply]
+    if not proxies then return end
+    for _, data in pairs(proxies) do
+        if IsValid(data.ent) then
+            proxyOwners[data.ent] = nil
+            data.ent:Remove()
+        end
+    end
+
+    vrProxies[ply] = nil
+end
+
+-- ==================== PREVENT PROXIES FROM COLLIDING WITH EACH OTHER ====================
+hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
+    if not IsValid(ent1) or not IsValid(ent2) then return end
+    local o1 = proxyOwners[ent1]
+    local o2 = proxyOwners[ent2]
+    if o1 and o2 and o1.ply == o2.ply then return false end
+end)
+
+-- ==================== SHADOW CONTROL IN THINK (extremely tight for hands) ====================
+hook.Add("Think", "VRProxy_PhysicsSync", function()
+    for _, ply in ipairs(player.GetHumans()) do
+        if not vrmod.IsPlayerInVR(ply) then continue end
+        local proxies = vrProxies[ply]
+        if not proxies or not proxies.head or not proxies.left or not proxies.right then
+            if not ply:InVehicle() then
+                RemoveVRProxies(ply)
+                timer.Simple(1, function() SpawnVRProxies(ply) end)
+            end
+
+            continue
+        end
+
+        if ply:InVehicle() then
+            RemoveVRProxies(ply)
+            continue
+        end
+
+        local function UpdateProxy(part)
+            local proxyData = proxies[part]
+            if not proxyData or not IsValid(proxyData.ent) or not IsValid(proxyData.phys) then return end
+            local pos, ang
+            if part == "head" then
+                pos, ang = vrmod.GetHMDPose(ply)
+                if not pos or not ang then return end
+            elseif part == "right" then
+                pos, ang = vrmod.GetRightHandPose(ply)
+            else
+                pos, ang = vrmod.GetLeftHandPose(ply)
+            end
+
+            if not pos or not ang then return end
+            -- Head: no forward offset, slightly down
+            local targetPos = part == "head" and pos + ang:Up() * -3 + ang:Forward() * -5 or pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
+            local phys = proxyData.phys
+            phys:Wake()
+            phys:ComputeShadowControl({
+                secondstoarrive = engine.TickInterval(), -- extremely fast
+                pos = targetPos,
+                angle = ang,
+                maxangular = 1000,
+                maxangulardamp = 1000,
+                maxspeed = 35000, -- very high for fast hands
+                maxspeeddamp = 2200,
+                dampfactor = 0.5, -- minimal lag
+                teleportdistance = 300,
+                deltatime = 0,
+            })
+        end
+
+        UpdateProxy("head")
+        UpdateProxy("right")
+        UpdateProxy("left")
+    end
+end)
+
+-- ==================== HOOKS ====================
+hook.Add("PlayerSwitchWeapon", "VRProxy_UpdateCollisionOnWeaponSwitch", function(ply, oldWep, newWep) UpdateWeaponCollisionShape(ply, newWep) end)
+hook.Add("VRMod_Pickup", "VRProxy_BlockPickup", function(ply, ent)
+    local proxies = vrProxies[ply]
+    if proxies and (proxies.right and ent == proxies.right.ent or proxies.left and ent == proxies.left.ent or proxies.head and ent == proxies.head.ent) then return false end
+end)
+
+hook.Add("VRMod_Start", "VRProxy_VRStart", SpawnVRProxies)
+hook.Add("PlayerSpawn", "VRProxy_PlayerSpawn", function(ply) if vrmod.IsPlayerInVR(ply) then timer.Simple(0.1, function() SpawnVRProxies(ply) end) end end)
+hook.Add("PlayerDeath", "VRProxy_PlayerDeath", RemoveVRProxies)
+hook.Add("VRMod_Exit", "VRProxy_VREnd", RemoveVRProxies)
+hook.Add("PlayerDisconnected", "VRProxy_Disconnect", function(ply) RemoveVRProxies(ply) end)
+hook.Add("PreCleanupMap", "VRProxy_PreCleanup", function()
+    local plys = {}
+    for ply in pairs(vrProxies) do
+        table.insert(plys, ply)
+    end
+
+    for _, ply in ipairs(plys) do
+        RemoveVRProxies(ply)
+    end
+end)
+
+hook.Add("PostCleanupMap", "VRProxy_PostCleanup", function()
+    for _, ply in ipairs(player.GetHumans()) do
+        if IsValid(ply) and vrmod.IsPlayerInVR(ply) then SpawnVRProxies(ply) end
+    end
+end)
+
+-- AVR mag hooks
+hook.Add("VRMod_Pickup", "VRProxy_AVRMagPickup", function(ply, ent)
+    if not IsValid(ent) or not string.match(ent:GetClass(), "avrmag_") then return end
+    local proxies = vrProxies[ply]
+    if proxies and proxies.left and IsValid(proxies.left.ent) then proxies.left.ent:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE) end
+end)
+
+hook.Add("VRMod_Drop", "VRProxy_AVRMagDrop", function(ply, ent)
+    if not IsValid(ent) or not string.match(ent:GetClass(), "avrmag_") then return end
+    local proxies = vrProxies[ply]
+    if proxies and proxies.left and IsValid(proxies.left.ent) then proxies.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
+end)
+
+-- ==================== Damage redirect (head = full + bullet ×10 instakill) ====================
+hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
+    if not IsValid(ent) then return end
+    local data = proxyOwners[ent]
+    if not data or not IsValid(data.ply) then return end
+    local ply = data.ply
+    local part = data.part
+    local dmgType = dmginfo:GetDamageType()
+    local attacker = dmginfo:GetAttacker()
+    local damage = dmginfo:GetDamage()
+    if damage <= 0 then return end
+    local isSelfDamage = IsValid(attacker) and attacker == ply
+    local isBulletDamage = bit.band(dmgType, DMG_BULLET) ~= 0 or bit.band(dmgType, DMG_BUCKSHOT) ~= 0
+    if isSelfDamage and not isBulletDamage and (part == "left" or part == "right") then
+        dmginfo:SetDamage(0)
+        dmginfo:ScaleDamage(0)
+        Log("Self-punch prevented on %s proxy of %s", part, ply:Nick())
+        return true
+    end
+
+    if part == "head" then
+        local finalDamage = damage
+        if isBulletDamage then
+            finalDamage = damage * 10
+            Log("HEAD BULLET HIT - multiplied %.2f → %.2f (instakill)", damage, finalDamage)
+        end
+
+        if ply:Alive() then
+            local newDmg = DamageInfo()
+            newDmg:SetDamage(finalDamage)
+            newDmg:SetAttacker(attacker or game.GetWorld())
+            newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
+            newDmg:SetDamageType(dmgType)
+            newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
+            newDmg:SetDamageForce(dmginfo:GetDamageForce())
+            ply:TakeDamageInfo(newDmg)
+            Log("VR head proxy damaged → applied %.2f to %s (head)", finalDamage, ply:Nick())
+        end
+
+        dmginfo:SetDamage(0)
+        dmginfo:ScaleDamage(0)
+        return true
+    else
+        local playerDamage = damage * 0.45
+        if ply:Alive() then
+            local newDmg = DamageInfo()
+            newDmg:SetDamage(playerDamage)
+            newDmg:SetAttacker(attacker or game.GetWorld())
+            newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
+            newDmg:SetDamageType(dmgType)
+            newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
+            newDmg:SetDamageForce(dmginfo:GetDamageForce() * 0.45)
+            ply:TakeDamageInfo(newDmg)
+            Log("VR hand proxy damaged → applied %.2f (45%% of %.2f) to %s (%s)", playerDamage, damage, ply:Nick(), part)
+        end
+
+        if vrmod and type(vrmod.Drop) == "function" then
+            local steamid = ply:SteamID()
+            vrmod.Drop(steamid, part == "left")
+            Log("Called vrmod.Drop because %s proxy was hit", part)
+        end
+
+        dmginfo:SetDamage(0)
+        dmginfo:ScaleDamage(0)
+        return true
+    end
+end)
+
+-- ==================== VEHICLE COLLISION HANDLING ====================
+function vrmod.SetVRProxiesNoCollide(ply, noCollide)
+    if not IsValid(ply) or not vrProxies[ply] then return end
+    local group = noCollide and COLLISION_GROUP_IN_VEHICLE or COLLISION_GROUP_WEAPON
+    for _, part in ipairs({"head", "left", "right"}) do
+        local proxyData = vrProxies[ply][part]
+        if proxyData and IsValid(proxyData.ent) then
+            proxyData.ent:SetCollisionGroup(group)
+            Log("SetVRProxiesNoCollide → %s = %s", part, noCollide and "NO COLLIDE" or "NORMAL")
+        end
+    end
+end
+
+vrmod.SetVRHandsNoCollide = vrmod.SetVRProxiesNoCollide

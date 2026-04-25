@@ -567,13 +567,13 @@ if SERVER then
         -- Case 1: ent1 is a patched prop
         if ent1._collisionPatched then
             if ent2 == ent1._pickupOwner then return false end
-            if ent2:GetNWBool("isVRHand", false) then return false end
+            if ent2:GetNWBool("isVRProxy", false) then return false end
         end
 
         -- Case 2: ent2 is a patched prop
         if ent2._collisionPatched then
             if ent1 == ent2._pickupOwner then return false end
-            if ent1:GetNWBool("isVRHand", false) then return false end
+            if ent1:GetNWBool("isVRProxy", false) then return false end
         end
     end)
 

@@ -14,7 +14,7 @@ end
 function vrmod.utils.HitFilter(ent, ply, hand)
     if not IsValid(ent) then return false end
     if ent == ply then return end
-    if ent:GetNWBool("isVRHand", false) then return false end
+    if ent:GetNWBool("isVRProxy", false) then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
         local held = vrmod.GetHeldEntity(ply, hand)
         if IsValid(held) and held == ent then return false end
