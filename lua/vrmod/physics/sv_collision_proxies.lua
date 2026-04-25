@@ -99,7 +99,7 @@ local function SpawnVRProxies(ply)
                 proxy:DrawShadow(true)
                 proxy:SetRenderMode(RENDERMODE_NORMAL)
                 if part == "head" then
-                    proxy:SetModelScale(3.5) -- halved size
+                    proxy:SetModelScale(3.5)
                     proxy:SetColor(Color(255, 0, 0, 150))
                     proxy:SetMaterial("models/debug/debugwhite")
                 end
@@ -161,6 +161,14 @@ local function SpawnVRProxies(ply)
             if vrmod.utils.IsValidWep(wep) then UpdateWeaponCollisionShape(ply, wep) end
         end
     end)
+
+    -- NEW: Give proxies 1 second of no-collide right after spawn/enter VR
+    timer.Simple(0.05, function()
+        if IsValid(ply) and vrProxies[ply] then
+            vrmod.SetVRProxiesNoCollide(ply, true)
+            timer.Simple(1.0, function() if IsValid(ply) and vrProxies[ply] then vrmod.SetVRProxiesNoCollide(ply, false) end end)
+        end
+    end)
 end
 
 local function RemoveVRProxies(ply)
@@ -185,7 +193,7 @@ hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
     if o1 and o2 and o1.ply == o2.ply then return false end
 end)
 
--- ==================== SHADOW CONTROL IN THINK (extremely tight for hands) ====================
+-- ==================== SHADOW CONTROL IN THINK ====================
 hook.Add("Think", "VRProxy_PhysicsSync", function()
     for _, ply in ipairs(player.GetHumans()) do
         if not vrmod.IsPlayerInVR(ply) then continue end
@@ -218,19 +226,18 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
             end
 
             if not pos or not ang then return end
-            -- Head: no forward offset, slightly down
             local targetPos = part == "head" and pos + ang:Up() * -3 + ang:Forward() * -5 or pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
             local phys = proxyData.phys
             phys:Wake()
             phys:ComputeShadowControl({
-                secondstoarrive = engine.TickInterval(), -- extremely fast
+                secondstoarrive = engine.TickInterval(),
                 pos = targetPos,
                 angle = ang,
                 maxangular = 1000,
                 maxangulardamp = 1000,
-                maxspeed = 35000, -- very high for fast hands
+                maxspeed = 35000,
                 maxspeeddamp = 2200,
-                dampfactor = 0.5, -- minimal lag
+                dampfactor = 0.5,
                 teleportdistance = 300,
                 deltatime = 0,
             })
@@ -284,7 +291,7 @@ hook.Add("VRMod_Drop", "VRProxy_AVRMagDrop", function(ply, ent)
     if proxies and proxies.left and IsValid(proxies.left.ent) then proxies.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
 
--- ==================== Damage redirect (head = full + bullet ×10 instakill) ====================
+-- ==================== Damage redirect ====================
 hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
     if not IsValid(ent) then return end
     local data = proxyOwners[ent]
