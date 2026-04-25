@@ -91,7 +91,12 @@ local function SpawnVRProxies(ply)
             if proxies[part] and IsValid(proxies[part].ent) then return end
             local proxy = ents.Create("prop_physics")
             if not IsValid(proxy) then return end
-            proxy:SetModel("models/hunter/plates/plate.mdl")
+            if part == "head" then
+                proxy:SetModel("models/Gibs/HGIBS.mdl")
+            else
+                proxy:SetModel("models/hunter/plates/plate.mdl")
+            end
+
             proxy:SetPos(ply:GetPos())
             proxy:Spawn()
             if DEBUG_VISIBLE_PROXIES then
@@ -124,7 +129,7 @@ local function SpawnVRProxies(ply)
                 part = part
             }
 
-            local radius = part == "head" and 3.2 or 3.0
+            local radius = part == "head" and 3.5 or 2.8
             ApplySphere(proxy, proxies[part], radius)
             proxy:AddCallback("PhysicsCollide", function(ent, data)
                 local hit = data.HitEntity
@@ -226,7 +231,13 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
             end
 
             if not pos or not ang then return end
-            local targetPos = part == "head" and pos + ang:Up() * -3 + ang:Forward() * -5 or pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
+            local targetPos
+            if part == "head" then
+                targetPos = pos + ang:Up() * -5 -- -6 = slight down, -10 = more down
+            else
+                targetPos = pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
+            end
+
             local phys = proxyData.phys
             phys:Wake()
             phys:ComputeShadowControl({
@@ -356,6 +367,30 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
         dmginfo:SetDamage(0)
         dmginfo:ScaleDamage(0)
         return true
+    end
+end)
+
+hook.Add("EntityFireBullets", "VRProxy_HeadshotBackup", function(ent, data)
+    if not IsValid(ent) or not ent:IsPlayer() or not vrmod.IsPlayerInVR(ent) then return end
+    local proxies = vrProxies[ent]
+    if not proxies or not proxies.head or not IsValid(proxies.head.ent) then return end
+    local head = proxies.head.ent
+    local muzzle = data.Src or ent:GetShootPos()
+    local headPos = head:GetPos()
+    local dist = muzzle:Distance(headPos)
+    if dist < 45 then
+        local dirToHead = (headPos - muzzle):GetNormalized()
+        local aimDir = data.Dir or ent:GetAimVector()
+        local dot = dirToHead:Dot(aimDir)
+        if dot > 0.3 then
+            local dmginfo = DamageInfo()
+            dmginfo:SetDamage((data.Damage or 25) * 10) -- ← 10x damage
+            dmginfo:SetAttacker(ent)
+            dmginfo:SetInflictor(ent:GetActiveWeapon() or ent)
+            dmginfo:SetDamageType(DMG_BULLET)
+            dmginfo:SetDamagePosition(headPos)
+            head:TakeDamageInfo(dmginfo)
+        end
     end
 end)
 
