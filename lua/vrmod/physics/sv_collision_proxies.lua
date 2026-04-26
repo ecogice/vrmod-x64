@@ -195,7 +195,43 @@ hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
     if not IsValid(ent1) or not IsValid(ent2) then return end
     local o1 = proxyOwners[ent1]
     local o2 = proxyOwners[ent2]
+    -- Prevent same-player proxy self-collision
     if o1 and o2 and o1.ply == o2.ply then return false end
+    -- Disable collisions with world (walls, floor, ceiling) — no more sparks or wall noises
+    local isWorld1 = ent1:IsWorld() or ent1:GetClass() == "worldspawn"
+    local isWorld2 = ent2:IsWorld() or ent2:GetClass() == "worldspawn"
+    local isProxy1 = o1 or ent1:GetNWBool("isVRProxy", false)
+    local isProxy2 = o2 or ent2:GetNWBool("isVRProxy", false)
+    if isProxy1 and isWorld2 or isProxy2 and isWorld1 then return false end
+end)
+
+-- ==================== BLOCK ALL SOUNDS & EFFECTS FROM PROXIES ====================
+hook.Add("EntityEmitSound", "VRProxy_BlockSounds", function(data)
+    if not data or not data.Pos then return end
+    -- 1. Direct block if the proxy itself is trying to emit sound
+    if IsValid(data.Entity) and data.Entity:GetNWBool("isVRProxy", false) then return false end
+    -- 2. Block impact / physics / metal / concrete / glass sounds if they happen very close to any VR proxy
+    local snd = data.SoundName or ""
+    if string.find(snd, "impact") or string.find(snd, "physics") or string.find(snd, "metal") or string.find(snd, "concrete") or string.find(snd, "glass") then
+        for _, ply in ipairs(player.GetHumans()) do
+            if vrmod.IsPlayerInVR(ply) then
+                local proxies = vrProxies[ply]
+                if proxies then
+                    for _, part in ipairs({"head", "left", "right"}) do
+                        local proxyEnt = proxies[part] and proxies[part].ent
+                        if IsValid(proxyEnt) and proxyEnt:GetPos():DistToSqr(data.Pos) < 12000 then return false end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ==================== BLOCK VISUAL EFFECTS (sparks, dust, impacts, etc.) ====================
+hook.Add("PreEntityEmitEffect", "VRProxy_BlockEffects", function(ent, effect)
+    if IsValid(ent) and ent:GetNWBool("isVRProxy", false) then
+        return false -- Block sparks, impact effects, particles, etc.
+    end
 end)
 
 -- ==================== SHADOW CONTROL IN THINK ====================
