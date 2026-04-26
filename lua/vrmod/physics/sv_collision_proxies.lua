@@ -146,12 +146,25 @@ local function SpawnVRProxies(ply)
                     if vel then speed = vel:Length() end
                 end
 
-                if speed > 35 then
+                if speed > 5 then
                     local physHit = hit:GetPhysicsObject()
                     if IsValid(physHit) then
                         local pushDir = data.HitNormal * -1
-                        physHit:ApplyForceCenter(pushDir * speed * 14.0)
-                        Log("PHYSICS PUSH %s → prop | Speed: %.1f", part, speed)
+                        local pushAmount = speed * 5.0
+                        -- Prevent pushing props inside walls/other props (extends anti-clip logic)
+                        local trace = util.TraceHull({
+                            start = hit:GetPos(),
+                            endpos = hit:GetPos() + pushDir * 25,
+                            mins = hit:OBBMins() * 0.7,
+                            maxs = hit:OBBMaxs() * 0.7,
+                            filter = {hit, ply},
+                            mask = MASK_SOLID
+                        })
+
+                        if not trace.Hit then
+                            physHit:ApplyForceCenter(pushDir * pushAmount)
+                            Log("PHYSICS PUSH %s → prop | Speed: %.1f", part, speed)
+                        end
                     end
                 end
             end)
@@ -190,7 +203,9 @@ local function RemoveVRProxies(ply)
     vrProxies[ply] = nil
 end
 
--- ==================== PREVENT PROXIES FROM COLLIDING WITH EACH OTHER ====================
+-- ==================== PREVENT PROXIES FROM COLLIDING WITH EACH OTHER + DISABLE WALL COLLISIONS ====================
+-- We disable world collisions because we have separate handling (PhysicsCollide push + damage redirect)
+-- This completely eliminates sparks, impact sounds, and effects when touching walls/floors
 hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
     if not IsValid(ent1) or not IsValid(ent2) then return end
     local o1 = proxyOwners[ent1]
@@ -205,12 +220,14 @@ hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
     if isProxy1 and isWorld2 or isProxy2 and isWorld1 then return false end
 end)
 
--- ==================== BLOCK ALL SOUNDS & EFFECTS FROM PROXIES ====================
+-- ==================== BLOCK ALL SOUNDS FROM PROXIES (including wall impact sounds) ====================
+-- Blocks sounds emitted directly by proxies + any impact/physics sounds played near a proxy
+-- (catches the case where the wall plays the "prop hit" noise)
 hook.Add("EntityEmitSound", "VRProxy_BlockSounds", function(data)
     if not data or not data.Pos then return end
     -- 1. Direct block if the proxy itself is trying to emit sound
     if IsValid(data.Entity) and data.Entity:GetNWBool("isVRProxy", false) then return false end
-    -- 2. Block impact / physics / metal / concrete / glass sounds if they happen very close to any VR proxy
+    -- 2. Block impact / physics / metal / concrete sounds if they happen very close to any VR proxy
     local snd = data.SoundName or ""
     if string.find(snd, "impact") or string.find(snd, "physics") or string.find(snd, "metal") or string.find(snd, "concrete") or string.find(snd, "glass") then
         for _, ply in ipairs(player.GetHumans()) do
@@ -219,7 +236,9 @@ hook.Add("EntityEmitSound", "VRProxy_BlockSounds", function(data)
                 if proxies then
                     for _, part in ipairs({"head", "left", "right"}) do
                         local proxyEnt = proxies[part] and proxies[part].ent
-                        if IsValid(proxyEnt) and proxyEnt:GetPos():DistToSqr(data.Pos) < 12000 then return false end
+                        if IsValid(proxyEnt) and proxyEnt:GetPos():DistToSqr(data.Pos) < 12000 then -- ~110 units radius
+                            return false
+                        end
                     end
                 end
             end
@@ -274,6 +293,17 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
                 targetPos = pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
             end
 
+            -- Prevent proxy from being forced inside walls (causes sparkles when hand pose clips geometry)
+            local trace = util.TraceHull({
+                start = pos,
+                endpos = targetPos,
+                mins = Vector(-4, -4, -4),
+                maxs = Vector(4, 4, 4),
+                filter = {ply, proxyData.ent},
+                mask = MASK_SOLID
+            })
+
+            if trace.Hit then targetPos = trace.HitPos + trace.HitNormal * 3 end
             local phys = proxyData.phys
             phys:Wake()
             phys:ComputeShadowControl({
@@ -338,7 +368,7 @@ hook.Add("VRMod_Drop", "VRProxy_AVRMagDrop", function(ply, ent)
     if proxies and proxies.left and IsValid(proxies.left.ent) then proxies.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
 
--- ==================== Damage redirect ====================
+-- ==================== Damage redirect (ONLY bullet damage triggers VR logic) ====================
 hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
     if not IsValid(ent) then return end
     local data = proxyOwners[ent]
@@ -351,6 +381,7 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
     if damage <= 0 then return end
     local isSelfDamage = IsValid(attacker) and attacker == ply
     local isBulletDamage = bit.band(dmgType, DMG_BULLET) ~= 0 or bit.band(dmgType, DMG_BUCKSHOT) ~= 0
+    -- Self-punch prevention stays (non-bullet only)
     if isSelfDamage and not isBulletDamage and (part == "left" or part == "right") then
         dmginfo:SetDamage(0)
         dmginfo:ScaleDamage(0)
@@ -358,13 +389,16 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
         return true
     end
 
-    if part == "head" then
-        local finalDamage = damage
-        if isBulletDamage then
-            finalDamage = damage * 10
-            Log("HEAD BULLET HIT - multiplied %.2f → %.2f (instakill)", damage, finalDamage)
-        end
+    -- ONLY bullet damage uses the special VR proxy logic (head multiplier / hand damage + drop)
+    if not isBulletDamage then
+        dmginfo:SetDamage(0)
+        dmginfo:ScaleDamage(0)
+        return true
+    end
 
+    if part == "head" then
+        local finalDamage = damage * 10
+        Log("HEAD BULLET HIT - multiplied %.2f → %.2f (instakill)", damage, finalDamage)
         if ply:Alive() then
             local newDmg = DamageInfo()
             newDmg:SetDamage(finalDamage)
@@ -381,6 +415,7 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
         dmginfo:ScaleDamage(0)
         return true
     else
+        -- hands: 45% damage + drop weapon (bullets only)
         local playerDamage = damage * 0.45
         if ply:Alive() then
             local newDmg = DamageInfo()
