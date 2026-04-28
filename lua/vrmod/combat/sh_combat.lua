@@ -156,7 +156,6 @@ if CLIENT then
         local headVel = vrmod.GetHMDVelocity()
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
         local headForwardSpeed = headVel:Length()
-        print(headVel)
         local headThreshold = threshold * 0.5 -- higher threshold so normal head bobbing / small movements don't cause constant punching when standing still
         if leftVel:Length() < threshold and rightVel:Length() < threshold and headForwardSpeed < headThreshold then return end
         -- Try melee for both hands + head
