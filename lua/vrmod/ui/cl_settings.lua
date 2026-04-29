@@ -482,8 +482,9 @@ function VRUtilOpenMenu()
 		end
 
 		AddCB("Disable Pickup (Client)", "vr_pickup_disable_client")
-		AddCB("Disable prop physics ", "vrmod_pickup_no_phys")
-		AddCB("Enable wall collisions", "vrmod_collisions")
+		AddCB("Disable pickup prop physics (Server)", "vrmod_pickup_no_phys")
+		AddCB("Enable wall collisions (Client)", "vrmod_collisions")
+		AddCB("Enable prop collisions (Server)", "vrmod_collison_proxy")
 		AddCB("Flashlight on the left hand (Client)", "vrmod_flashlight_attachment")
 		AddCB("Drop weapon on grip release (Client)", "vrmod_weapondrop_enable")
 		AddCB("Manual item pickup (Client)", "vrmod_manualpickups")
@@ -534,6 +535,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_pickup_npcs", "1")
 			RunConsoleCommand("vrmod_pickup_halos", "1")
 			RunConsoleCommand("vrmod_collisions", "1")
+			RunConsoleCommand("vrmod_collison_proxy", "1")
 		end
 
 		y = y + 45

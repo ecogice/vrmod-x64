@@ -9,6 +9,8 @@ local function Log(msg, ...)
     vrmod.logger.Debug("[VRProxy] " .. msg, ...)
 end
 
+-- ==================== CONVARS ====================
+local cvEnableProxy = CreateConVar("vrmod_collison_proxy", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable VR collision proxies module (0 = completely disabled)")
 -- ==================== ORIGINAL WEAPON LOGIC (unchanged) ====================
 local function GetCachedWeaponParams(wep, ply, side)
     local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
@@ -81,7 +83,7 @@ end
 
 -- ==================== SPAWN ====================
 local function SpawnVRProxies(ply)
-    if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then return end
+    if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() or not cvEnableProxy:GetBool() or ply:GetMoveType() == MOVETYPE_NOCLIP then return end
     if vrProxies[ply] and vrProxies[ply].head and IsValid(vrProxies[ply].head.ent) and vrProxies[ply].left and IsValid(vrProxies[ply].left.ent) and vrProxies[ply].right and IsValid(vrProxies[ply].right.ent) then return end
     if not vrProxies[ply] then vrProxies[ply] = {} end
     local proxies = vrProxies[ply]
@@ -255,13 +257,34 @@ end)
 
 -- ==================== SHADOW CONTROL IN THINK ====================
 hook.Add("Think", "VRProxy_PhysicsSync", function()
+    if not cvEnableProxy:GetBool() then
+        local plysToClean = {}
+        for ply in pairs(vrProxies) do
+            table.insert(plysToClean, ply)
+        end
+
+        for _, ply in ipairs(plysToClean) do
+            if IsValid(ply) then RemoveVRProxies(ply) end
+        end
+        return
+    end
+
     for _, ply in ipairs(player.GetHumans()) do
         if not vrmod.IsPlayerInVR(ply) then continue end
+        if ply:GetMoveType() == MOVETYPE_NOCLIP then
+            if vrProxies[ply] then
+                RemoveVRProxies(ply)
+                Log("Removed proxies due to noclip for %s", ply:Nick())
+            end
+
+            continue
+        end
+
         local proxies = vrProxies[ply]
         if not proxies or not proxies.head or not proxies.left or not proxies.right then
             if not ply:InVehicle() then
                 RemoveVRProxies(ply)
-                timer.Simple(1, function() SpawnVRProxies(ply) end)
+                timer.Simple(1, function() if IsValid(ply) and vrmod.IsPlayerInVR(ply) and cvEnableProxy:GetBool() and ply:GetMoveType() ~= MOVETYPE_NOCLIP then SpawnVRProxies(ply) end end)
             end
 
             continue
