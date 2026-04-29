@@ -79,6 +79,7 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 			newWep.Chambered = snap.Chambered
 			newWep.Magazine = snap.Magazine
 			if IsValid(newWep.Magazine) then newWep.Magazine.Weapon = newWep end
+			if snap.Attachments then newWep.Attachments = snap.Attachments end
 			newWep:SendWeapon(true, true)
 		end)
 	end
