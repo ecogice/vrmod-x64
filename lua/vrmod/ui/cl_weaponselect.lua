@@ -139,6 +139,27 @@ local function DrawIconLayered(x, y, size, material, repeats, alphaStep, scaleSt
 	end
 end
 
+-- =============================================
+-- SMART AMMO GETTER (only ArcticVR uses custom count)
+-- =============================================
+local function GetWeaponAmmo(wep, ply)
+	if not IsValid(wep) then return 0, 0, 0 end
+	local clip = 0
+	local total = 0
+	local alt = 0
+	-- Standard methods first
+	if wep.Clip1 then clip = wep:Clip1() or 0 end
+	local primaryType = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
+	if primaryType and primaryType > 0 then total = ply:GetAmmoCount(primaryType) or 0 end
+	local secondaryType = wep.GetSecondaryAmmoType and wep:GetSecondaryAmmoType() or -1
+	if secondaryType and secondaryType > 0 then alt = ply:GetAmmoCount(secondaryType) or 0 end
+	-- === ONLY FOR ARCTICVR WEAPONS ===
+	if wep.ArcticVR and clip <= 0 then clip = (wep.LoadedRounds or 0) + (wep.Chambered or 0) end
+	-- Fallback for total if still zero
+	if total <= 0 and wep.Primary and wep.Primary.Ammo then total = ply:GetAmmoCount(wep.Primary.Ammo) or 0 end
+	return clip, total, alt
+end
+
 -- Main menu open
 local open = false
 function VRUtilWeaponMenuOpen()
@@ -199,17 +220,14 @@ function VRUtilWeaponMenuOpen()
 		hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 		open = false
 		local ply = LocalPlayer()
-		-- if we clicked the inner circle, toggle empty ↔ last
 		if innerClick then
 			local aw = ply:GetActiveWeapon()
 			local activeClass = IsValid(aw) and aw:GetClass() or nil
 			if activeClass ~= "weapon_vrmod_empty" then
-				-- store current and switch to empty
 				lastWeaponClass = activeClass
 				local emptyWep = ply:GetWeapon("weapon_vrmod_empty")
 				if IsValid(emptyWep) then input.SelectWeapon(emptyWep) end
 			elseif activeClass == "weapon_vrmod_empty" and lastWeaponClass and lastWeaponClass ~= "weapon_vrmod_empty" then
-				-- switch back to last weapon
 				local prevWep = ply:GetWeapon(lastWeaponClass)
 				if IsValid(prevWep) then input.SelectWeapon(prevWep) end
 			end
@@ -223,39 +241,30 @@ function VRUtilWeaponMenuOpen()
 
 	hook.Add("PreRender", "vrutil_hook_renderweaponselect", function()
 		if g_VR.menuFocus ~= "weaponmenu" then return end
-		-- ─── Tunable parameters ───────────────────────────────────────
-		local CX, CY = 256, 256 -- center of menu
-		local INNER_R = 60 -- inner ring radius
-		local OUTER_R = 140 -- outer ring radius
-		local SLOT_MIN_DIST = 40 -- dist > this to hover a slot
-		local SLOT_MAX_DIST = INNER_R + 20 -- dist < this to hover a slot
-		local ICON_RADIUS_FACTOR = 0.9 -- iconR = OUTER_R * this
-		local PETAL_HOVER_RADIUS = ICON_SIZE * 0.75 -- for center‑text update only
-		local SLICE_SEGMENTS = 64 -- resolution of slice polygons
-		-- ──────────────────────────────────────────────────────────────
-		-- 1) Gather player stats
+		local CX, CY = 256, 256
+		local INNER_R = 60
+		local OUTER_R = 140
+		local SLOT_MIN_DIST = 40
+		local SLOT_MAX_DIST = INNER_R + 20
+		local ICON_RADIUS_FACTOR = 0.9
+		local PETAL_HOVER_RADIUS = ICON_SIZE * 0.75
+		local SLICE_SEGMENTS = 64
 		local values = {
 			hoveredSlot = -1,
 			hoveredItem = -1
 		}
 
 		values.health, values.suit = ply:Health(), ply:Armor()
-		do
-			local aw = ply:GetActiveWeapon()
-			if IsValid(aw) then
-				values.clip, values.total, values.alt = aw:Clip1(), ply:GetAmmoCount(aw:GetPrimaryAmmoType()), ply:GetAmmoCount(aw:GetSecondaryAmmoType())
-			else
-				values.clip, values.total, values.alt = 0, 0, 0
-			end
-		end
-
-		-- 2) Cursor polar coords
+		-- === USE SMART AMMO GETTER ===
+		local aw = ply:GetActiveWeapon()
+		values.clip, values.total, values.alt = GetWeaponAmmo(aw, ply)
+		-- Cursor polar coords
 		local dx, dy = g_VR.menuCursorX - CX, g_VR.menuCursorY - CY
 		local dist2 = dx * dx + dy * dy
 		local dist = math.sqrt(dist2)
 		local angDeg = math.deg(math.atan2(dy, dx))
 		if angDeg < 0 then angDeg = angDeg + 360 end
-		-- 3) Slot hover detection
+		-- Slot hover detection
 		if dist > SLOT_MIN_DIST and dist < SLOT_MAX_DIST then
 			local segSize = 360 / #slots
 			local idx = math.floor(angDeg / segSize) + 1
@@ -266,7 +275,7 @@ function VRUtilWeaponMenuOpen()
 		end
 
 		innerClick = dist <= INNER_R
-		-- 4) Petal hover detection (for center‑text only)
+		-- Petal hover detection
 		if chosenSlot then
 			local sel = slots[chosenSlot]
 			local itemCount = #sel.items
@@ -288,7 +297,7 @@ function VRUtilWeaponMenuOpen()
 			end
 		end
 
-		-- 5) Only redraw on change
+		-- Only redraw on change
 		local dirty = false
 		for k, v in pairs(values) do
 			if prev[k] ~= v then
@@ -299,7 +308,6 @@ function VRUtilWeaponMenuOpen()
 
 		if not dirty then return end
 		prev = values
-		-- 6) Draw everything
 		VRUtilMenuRenderStart("weaponmenu")
 		-- Outer ring
 		surface.SetDrawColor(0, 0, 0, 200)
@@ -344,7 +352,7 @@ function VRUtilWeaponMenuOpen()
 			draw.SimpleText(slotNames[slot.slot], "vrmod_font_mid", lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 
-		-- Petal icons (no highlight)
+		-- Petal icons
 		if chosenSlot then
 			local sel = slots[chosenSlot]
 			local itemCount = #sel.items
@@ -361,7 +369,7 @@ function VRUtilWeaponMenuOpen()
 			end
 		end
 
-		-- Center name & stats (text changes only)
+		-- Center name & stats
 		local name = "Select Slot"
 		if chosenSlot and prev.hoveredItem >= 1 then
 			name = slots[chosenSlot].items[prev.hoveredItem].label
