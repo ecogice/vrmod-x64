@@ -22,6 +22,7 @@ if CLIENT then
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
+	local pickupFrameCounter = 0
 	-- Cleanup clones only for normal props on drop
 	hook.Add("VRMod_Drop", "vrmod_drop_cooldown", function(ply, ent)
 		if not IsValid(ent) or vrmod.utils.IsIgnoredProp(ent) then return end
@@ -34,9 +35,14 @@ if CLIENT then
 		end
 	end)
 
-	hook.Add("Tick", "vrmod_find_pickup_target", function()
+	hook.Add("VRMod_Tracking", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
+		pickupFrameCounter = pickupFrameCounter + 1
+		if pickupFrameCounter % 2 == 1 then
+			return -- skip every odd frame (run only on even frames)
+		end
+
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight

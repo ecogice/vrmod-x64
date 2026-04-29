@@ -15,6 +15,7 @@ local blacklistedClasses = {
 
 local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "streetlight", "traffic", "texture", "shadow", "keypad"}
 local pickupableCache = {}
+local pickupTargetCache = {}
 local invalidPickupCache = {}
 if SERVER then util.AddNetworkString("vrmod_pickuplists_reload") end
 local function DebugEnabled()
@@ -243,12 +244,22 @@ end
 
 function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
     if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
+    local handKey = bLeftHand and "left" or "right"
+    local cached = pickupTargetCache[handKey]
+    -- === FAST PATH: Hand didn't move much? Return cached result ===
+    if cached and cached.lastPos then
+        if (handPos - cached.lastPos):LengthSqr() < 2.0 * 2.0 then -- 2 units (~5cm)
+            if CurTime() - (cached.time or 0) < 0.4 then return cached.ent end
+        end
+    end
+
+    -- === SLOW PATH: Do the real work (only when hand moved) ===
     local ent
     local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
     -- Sphere search first
     local sphereEnt, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
     if IsValid(sphereEnt) and sphereEnt ~= ply and vrmod.utils.IsValidPickupTarget(sphereEnt, ply, bLeftHand) and vrmod.utils.CanPickupEntity(sphereEnt, ply, convarValues or vrmod.GetConvars()) then ent = sphereEnt end
-    -- Fallback to trace if sphere failed validation
+    -- Fallback to trace
     if not IsValid(ent) then
         local hand = bLeftHand and "left" or "right"
         local tr = vrmod.utils.TraceHand(ply, hand, true)
@@ -258,23 +269,61 @@ function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRa
         end
     end
 
-    if not IsValid(ent) then return nil end
+    if not IsValid(ent) then
+        pickupTargetCache[handKey] = {
+            ent = nil,
+            lastPos = handPos,
+            time = CurTime()
+        }
+        return nil
+    end
+
     -- Range check with boost
     local boost = 1.0
     if vrmod.utils.IsImportantPickup(ent) then
         boost = 5.0
-    else
-        if ent:IsNPC() then boost = 3.0 end
+    elseif ent:IsNPC() then
+        boost = 3.0
     end
 
     local maxDist = pickupRange * 10 * boost
-    if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then return nil end
+    if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then
+        pickupTargetCache[handKey] = {
+            ent = nil,
+            lastPos = handPos,
+            time = CurTime()
+        }
+        return nil
+    end
+
     -- Weapon-specific rules
     if vrmod.utils.IsWeaponEntity(ent) then
         local aw = ply:GetActiveWeapon()
-        if IsValid(aw) and aw:GetClass() == ent:GetClass() then return nil end
-        if not bLeftHand and vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then return nil end
+        if IsValid(aw) and aw:GetClass() == ent:GetClass() then
+            pickupTargetCache[handKey] = {
+                ent = nil,
+                lastPos = handPos,
+                time = CurTime()
+            }
+            return nil
+        end
+
+        if not bLeftHand and vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then
+            pickupTargetCache[handKey] = {
+                ent = nil,
+                lastPos = handPos,
+                time = CurTime()
+            }
+            return nil
+        end
     end
+
+    -- Cache successful result
+    pickupTargetCache[handKey] = {
+        ent = ent,
+        lastPos = handPos,
+        time = CurTime()
+    }
     return ent
 end
 
