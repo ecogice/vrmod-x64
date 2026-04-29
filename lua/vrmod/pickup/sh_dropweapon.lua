@@ -13,7 +13,7 @@ end
 if SERVER then
     -- Create blacklist file with defaults if missing
     if not file.Exists(blacklist_path, "DATA") then
-        local default_blacklist = {"weapon_fists", "piss_swep", "weapon_bsmod_punch", "weapon_vrmod_empty", "weapon_haax_vr", "alex_matrix_stopbullets", "blink", "spartan_kick", "arcticvr_nade_frag", "arcticvr_nade_flash", "arcticvr_nade_smoke"}
+        local default_blacklist = {"weapon_fists", "piss_swep", "weapon_bsmod_punch", "weapon_vrmod_empty", "weapon_haax_vr", "alex_matrix_stopbullets", "blink", "spartan_kick", "arcticvr_nade_frag", "arcticvr_nade_flash", "arcticvr_nade_smoke", "arcticvr_ins2_m84", "arcticvr_ins2_m18", "arcticvr_ins2_m67"}
         file.Write(blacklist_path, table.concat(default_blacklist, "\n"))
     end
 
