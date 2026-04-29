@@ -140,7 +140,7 @@ if CLIENT then
     hook.Add("Think", "ArcticVR_Drop_AttachmentCleanup", function()
         for _, wep in ipairs(ents.FindByClass("arcticvr_*")) do
             if IsValid(wep) and wep.ArcticVR and not IsValid(wep:GetOwner()) then
-                SafeRemoveEntity(ArcticVR.CSMagazine)
+                wep:VRHolster()
                 if wep.RebuildAttModels then wep:RebuildAttModels() end
             end
         end
