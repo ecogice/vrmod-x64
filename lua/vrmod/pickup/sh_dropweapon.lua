@@ -79,14 +79,6 @@ if SERVER then
         if avrSnapshot then
             dropEnt.ArcticVR = true
             dropEnt.avrSnapshot = avrSnapshot
-            dropEnt.LoadedRounds = avrSnapshot.LoadedRounds
-            dropEnt.Chambered = avrSnapshot.Chambered
-            dropEnt.Magazine = avrSnapshot.Magazine
-            dropEnt.Attachments = avrSnapshot.Attachments
-            if IsValid(dropEnt.Magazine) then dropEnt.Magazine.Weapon = dropEnt end
-            wep.Attachments = nil
-            wep.Magazine = nil
-            timer.Simple(0, function() if IsValid(dropEnt) and dropEnt.SendWeapon then dropEnt:SendWeapon(true, true) end end)
         end
 
         -- ─────────────────────────────────────────────
@@ -99,7 +91,6 @@ if SERVER then
         end
 
         if dropAsWeapon then ply:StripWeapon(wep:GetClass()) end
-        timer.Simple(3, function() if IsValid(dropEnt) and dropEnt:GetClass() == "prop_physics" then dropEnt:Remove() end end)
     end)
 
     concommand.Add("vrmod_toggle_blacklist", function(ply)
@@ -147,31 +138,11 @@ if CLIENT then
     end)
 
     hook.Add("Think", "ArcticVR_Drop_AttachmentCleanup", function()
-        local hasDroppedArcVR = false
         for _, wep in ipairs(ents.FindByClass("arcticvr_*")) do
             if IsValid(wep) and wep.ArcticVR and not IsValid(wep:GetOwner()) then
-                hasDroppedArcVR = true
-                local keysToClear = {"AttachmentModels", "CSModels", "AttachedModels", "AttachmentCSModels", "Models", "AttachmentEntities", "AttModels"}
-                for _, key in ipairs(keysToClear) do
-                    if wep[key] then
-                        for _, mdl in pairs(wep[key]) do
-                            if IsValid(mdl) and mdl.Remove then mdl:Remove() end
-                        end
-
-                        wep[key] = {}
-                    end
-                end
-
+                SafeRemoveEntity(ArcticVR.CSMagazine)
                 if wep.RebuildAttModels then wep:RebuildAttModels() end
             end
-        end
-
-        if hasDroppedArcVR and ArcticVR and ArcticVR.AttachmentModels then
-            for k, v in pairs(ArcticVR.AttachmentModels) do
-                if IsValid(v) and v.Remove then v:Remove() end
-            end
-
-            ArcticVR.AttachmentModels = {}
         end
     end)
 end
