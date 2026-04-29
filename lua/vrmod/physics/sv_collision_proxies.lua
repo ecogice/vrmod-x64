@@ -222,25 +222,19 @@ hook.Add("ShouldCollide", "VRProxy_PreventSelfCollision", function(ent1, ent2)
     if isProxy1 and isWorld2 or isProxy2 and isWorld1 then return false end
 end)
 
--- ==================== BLOCK ALL SOUNDS FROM PROXIES (including wall impact sounds) ====================
--- Blocks sounds emitted directly by proxies + any impact/physics sounds played near a proxy
--- (catches the case where the wall plays the "prop hit" noise)
+-- ==================== BLOCK COLLISION SOUNDS ONLY WHEN HITTING A WALL ====================
 hook.Add("EntityEmitSound", "VRProxy_BlockSounds", function(data)
     if not data or not data.Pos then return end
-    -- 1. Direct block if the proxy itself is trying to emit sound
-    if IsValid(data.Entity) and data.Entity:GetNWBool("isVRProxy", false) then return false end
-    -- 2. Block impact / physics / metal / concrete sounds if they happen very close to any VR proxy
-    local snd = data.SoundName or ""
-    if string.find(snd, "impact") or string.find(snd, "physics") or string.find(snd, "metal") or string.find(snd, "concrete") or string.find(snd, "glass") then
+    local ent = data.Entity
+    if IsValid(ent) and ent:GetNWBool("isVRProxy", false) then return false end
+    if IsValid(ent) and (ent:IsWorld() or ent:GetClass() == "worldspawn") then
         for _, ply in ipairs(player.GetHumans()) do
             if vrmod.IsPlayerInVR(ply) then
                 local proxies = vrProxies[ply]
                 if proxies then
                     for _, part in ipairs({"head", "left", "right"}) do
                         local proxyEnt = proxies[part] and proxies[part].ent
-                        if IsValid(proxyEnt) and proxyEnt:GetPos():DistToSqr(data.Pos) < 12000 then -- ~110 units radius
-                            return false
-                        end
+                        if IsValid(proxyEnt) and proxyEnt:GetPos():DistToSqr(data.Pos) < 12000 then return false end
                     end
                 end
             end
