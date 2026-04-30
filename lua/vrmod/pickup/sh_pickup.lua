@@ -34,7 +34,7 @@ if CLIENT then
 		end
 	end)
 
-	hook.Add("Tick", "vrmod_find_pickup_target", function()
+	hook.Add("Think", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
