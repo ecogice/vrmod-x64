@@ -11,6 +11,7 @@ SWEP.Primary.DefaultClip = 0
 SWEP.Secondary.Ammo = "none"
 SWEP.Secondary.ClipSize = -1
 SWEP.Secondary.DefaultClip = -1
+if CLIENT then hook.Add("PrePlayerDraw", "LockMyPlayerColor", function(ply) if ply == LocalPlayer() then render.SetColorModulation(1, 1, 1) end end) end
 function SWEP:Initialize()
 	self:SetHoldType("fist")
 end
