@@ -70,7 +70,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
             return
         end
 
-        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        local radius, _, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
         if not radius or not mins or not maxs or not angles or radius == vrmod.DEFAULT_RADIUS then
             timer.Simple(0.5, function() UpdateWeaponCollisionShape(ply, wep) end)
             return
@@ -131,7 +131,7 @@ local function SpawnVRProxies(ply)
                 part = part
             }
 
-            local radius = part == "head" and 3.5 or 2.8
+            local radius = part == "head" and 2.8 or 2.3
             ApplySphere(proxy, proxies[part], radius)
             proxy:AddCallback("PhysicsCollide", function(ent, data)
                 local hit = data.HitEntity
