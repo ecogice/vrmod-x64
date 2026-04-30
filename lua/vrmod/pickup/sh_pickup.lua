@@ -182,6 +182,7 @@ if CLIENT then
 end
 
 if SERVER then
+	local UpdateCoroutine = nil
 	util.AddNetworkString("vrmod_pickup")
 	-- Drop function
 	function vrmod.Drop(steamid, bLeft)
@@ -237,35 +238,62 @@ if SERVER then
 		end
 	end)
 
-	local function UpdatePickupFlags()
-		vrmod.logger.Debug("Updating pickup flags for all players")
-		for _, ply in ipairs(player.GetAll()) do
-			local nearbyEntities = ents.FindInSphere(ply:GetPos(), 300)
-			local cv = {
-				vrmod_pickup_npcs = GetConVar("vrmod_pickup_npcs"):GetInt(),
-				vrmod_pickup_limit = GetConVar("vrmod_pickup_limit"):GetInt(),
-				vrmod_pickup_weight = GetConVar("vrmod_pickup_weight"):GetFloat()
-			}
+	local function UpdatePickupFlagsCoroutine()
+		local cv = {
+			vrmod_pickup_npcs = GetConVar("vrmod_pickup_npcs"):GetInt(),
+			vrmod_pickup_limit = GetConVar("vrmod_pickup_limit"):GetInt(),
+			vrmod_pickup_weight = GetConVar("vrmod_pickup_weight"):GetFloat()
+		}
 
-			vrmod.logger.Debug("Convar values: npcs=" .. cv.vrmod_pickup_npcs .. ", limit=" .. cv.vrmod_pickup_limit .. ", weight=" .. cv.vrmod_pickup_weight)
-			for _, ent in ipairs(nearbyEntities) do
+		local players = player.GetAll()
+		for _, ply in ipairs(players) do
+			if not IsValid(ply) then continue end
+			if not g_VR[ply:SteamID()] then continue end
+			if ply:InVehicle() then continue end
+			local nearby = ents.FindInSphere(ply:GetPos(), 1000)
+			for _, ent in ipairs(nearby) do
+				if not IsValid(ent) then return end
+				if ent._vrmod_pickupable == false then continue end
 				local canPickup = vrmod.utils.CanPickupEntity(ent, ply, cv)
-				vrmod.logger.Debug("Setting pickup flag for entity: " .. tostring(ent) .. ", player: " .. ply:SteamID() .. ", canPickup: " .. tostring(canPickup))
-				ent:SetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), canPickup)
+				local flag = "vrmod_pickup_valid_for_" .. ply:SteamID()
+				if ent:GetNWBool(flag, false) ~= canPickup then ent:SetNWBool(flag, canPickup) end
+				-- Yield every few entities (adjust number as needed)
+				if math.random(1, 10) == 1 then coroutine.yield() end
 			end
-		end
 
-		vrmod.logger.Debug("Finished updating pickup flags")
+			coroutine.yield()
+		end
 	end
 
-	-- Run every second for performance
-	timer.Create("VRMod_UpdatePickupFlags", 1, 0, UpdatePickupFlags)
+	hook.Add("Think", "VRMod_UpdatePickupFlags", function()
+		if not UpdateCoroutine or coroutine.status(UpdateCoroutine) == "dead" then UpdateCoroutine = coroutine.create(UpdatePickupFlagsCoroutine) end
+		if coroutine.status(UpdateCoroutine) == "suspended" then
+			local success, err = coroutine.resume(UpdateCoroutine)
+			if not success then
+				ErrorNoHaltWithStack("Pickup flag coroutine error: " .. tostring(err))
+				UpdateCoroutine = nil
+			end
+		end
+	end)
+
 	hook.Add("PlayerDeath", "vrmod_drop_items_on_death", function(ply)
 		if not IsValid(ply) then return end
 		local sid = ply:SteamID()
 		-- Force drop for both hands
 		vrmod.Drop(sid, true)
 		vrmod.Drop(sid, false)
+	end)
+
+	hook.Add("OnEntityCreated", "VRMod_PreloadPickupFlags", function(ent)
+		if not IsValid(ent) then return end
+		-- Skip players, weapons in hand, etc.
+		if ent:IsPlayer() or ent:IsWeapon() then return end
+		-- Use the existing heavy logic ONCE when the entity spawns
+		local isPickupable = not vrmod.utils.IsNonPickupable(ent)
+		-- Store it directly on the entity (fastest possible check later)
+		ent._vrmod_pickupable = isPickupable
+		-- Also set a networked bool so clients can see it without calling utils
+		ent:SetNWBool("vrmod_pickupable", isPickupable)
 	end)
 
 	hook.Add("AllowPlayerPickup", "vrmod", function(ply) return not g_VR[ply:SteamID()] end)

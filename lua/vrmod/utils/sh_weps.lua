@@ -30,7 +30,14 @@ end
 function vrmod.utils.IsWeaponEntity(ent)
     if not IsValid(ent) then return false end
     local c = ent:GetClass()
-    return ent:IsWeapon() or c:find("weapon_") or c == "prop_physics" and ent:GetModel():find("w_")
+    if not c then return false end
+    if ent:IsWeapon() or c:find("weapon_") then return true end
+    -- Safe check for weapon models on prop_physics
+    if c == "prop_physics" then
+        local mdl = ent:GetModel()
+        if mdl and mdl:find("w_") then return true end
+    end
+    return false
 end
 
 function vrmod.utils.WepInfo(wep)
