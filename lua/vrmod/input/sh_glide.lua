@@ -115,34 +115,37 @@ if SERVER then
             vehicle:SetInputBool(seatIndex, "detach_trailer", pressed)
         end
     end)
+
     hook.Add("Think", "GlideVRInputTimeout", function()
-    local now = CurTime()
-    for ply, t in pairs(lastInputTime) do
-        if not IsValid(ply) then
-            lastInputTime[ply] = nil
-            continue
-        end
-         -- Skip players not in VR
-        if not vrmod.IsPlayerInVR(ply) then
-            continue
-        end
-        if now - t > 1 then
-            local vehicle = ply:GetNWEntity("GlideVehicle")
-            local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
-            if IsValid(vehicle) then
-                vehicle:SetInputFloat(seatIndex, "throttle", 0)
-                vehicle:SetInputFloat(seatIndex, "accelerate", 0)
-                vehicle:SetInputFloat(seatIndex, "brake", 0)
-                vehicle:SetInputFloat(seatIndex, "steer", 0)
-                vehicle:SetInputFloat(seatIndex, "pitch", 0)
-                vehicle:SetInputFloat(seatIndex, "yaw", 0)
-                vehicle:SetInputFloat(seatIndex, "roll", 0)
+        local now = CurTime()
+        for ply, t in pairs(lastInputTime) do
+            if not IsValid(ply) then
+                lastInputTime[ply] = nil
+                continue
             end
-            lastInputTime[ply] = nil
+
+            -- Skip players not in VR
+            if not vrmod.IsPlayerInVR(ply) then continue end
+            if now - t > 1 then
+                local vehicle = ply:GetNWEntity("GlideVehicle")
+                local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
+                if IsValid(vehicle) then
+                    vehicle:SetInputFloat(seatIndex, "throttle", 0)
+                    vehicle:SetInputFloat(seatIndex, "accelerate", 0)
+                    vehicle:SetInputFloat(seatIndex, "brake", 0)
+                    vehicle:SetInputFloat(seatIndex, "steer", 0)
+                    vehicle:SetInputFloat(seatIndex, "pitch", 0)
+                    vehicle:SetInputFloat(seatIndex, "yaw", 0)
+                    vehicle:SetInputFloat(seatIndex, "roll", 0)
+                end
+
+                lastInputTime[ply] = nil
+            end
         end
-    end
-end)
+    end)
 else -- CLIENT
+    local ANALOG_SEND_RATE = engine.TickInterval() or 0.015
+    local nextSendTime = 0
     local originalMouseFlyMode = nil
     local originalRagdollEnable = nil
     local inputsToSend = {
@@ -182,6 +185,7 @@ else -- CLIENT
         local vehicle = g_VR.vehicle.current
         if not IsValid(vehicle) or not validVehicleTypes[vehicle.VehicleType] then return end
         if not inputsToSend[action] then return end
+        if CurTime() < nextSendTime then return end
         if lastInputState[action] ~= pressed then
             lastInputState[action] = pressed
             net.Start("glide_vr_input")
@@ -189,6 +193,8 @@ else -- CLIENT
             net.WriteBool(pressed)
             net.SendToServer()
         end
+
+        nextSendTime = CurTime() + ANALOG_SEND_RATE
     end)
 
     hook.Add("VRMod_Start", "Glide_ForceMouseFlyMode", function()
