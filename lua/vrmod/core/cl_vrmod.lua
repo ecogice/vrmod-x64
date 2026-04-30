@@ -130,6 +130,7 @@ if CLIENT then
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local maxPosDeltaSqr = 100
+		VRMOD_UpdatePosesAndActions()
 		local rawPoses = VRMOD_GetPoses()
 		for k, v in pairs(rawPoses) do
 			local lastPos = lastPosePos[k]
@@ -304,7 +305,6 @@ if CLIENT then
 
 		render.Clear(0, 0, 0, 255, true, true)
 		-- cache common values
-		local ply = LocalPlayer()
 		local rtHalfW = g_VR.rtWidth / 2
 		local rtH = g_VR.rtHeight
 		-- left eye
@@ -328,6 +328,7 @@ if CLIENT then
 		hook.Call("VRMod_PreRender", nil, "right")
 		render.RenderView(g_VR.view)
 		-- death animation
+		local ply = LocalPlayer()
 		if ply and not ply:Alive() then
 			vrmod.utils.DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
 			vrmod.logger.Debug("Player is dead, drawing death animation.")
@@ -508,13 +509,9 @@ if CLIENT then
 	local function BindRenderSceneHook()
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
-			VRMOD_UpdatePosesAndActions()
 			UpdateTracking()
 			UpdateCollisionsAndWepPos()
-			if g_VR.active and VRMOD_GetActions then -- extra safety
-				HandleInput()
-			end
-
+			HandleInput()
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
 			PerformRenderViews()
@@ -610,9 +607,7 @@ if CLIENT then
 		BindRenderSceneHook()
 		SetupModelAndPlayerHooks()
 		SetupShutdownHooks()
-		-- finalize
 		vrmod.StartLocomotion()
-		VRMOD_UpdatePosesAndActions()
 		g_VR.active = true
 		vrmod.logger.Info("Started VR session")
 	end
