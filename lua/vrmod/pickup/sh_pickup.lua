@@ -29,7 +29,7 @@ if CLIENT then
 			if g_VR then
 				local key = hand == "Left" and "cooldownLeft" or "cooldownRight"
 				g_VR[key] = true
-				timer.Simple(0.5, function() if g_VR then g_VR[key] = false end end)
+				timer.Simple(0.1, function() if g_VR then g_VR[key] = false end end)
 			end
 		end
 	end)

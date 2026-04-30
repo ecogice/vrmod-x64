@@ -81,6 +81,14 @@ function vrmod.utils.IsNonPickupable(ent)
         return pickupableCache[key]
     end
 
+    -- Weapon or important item overrides (allow all prop_*, weapons, important pickups FIRST,
+    -- so that prop_dynamic, prop_physics, etc. are not killed by the "dynamic" pattern below)
+    if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or vrmod.utils.IsImportantPickup(ent) then
+        vrmod.logger.Debug("IsNonPickupable: Entity is a weapon, prop, or important pickup -> " .. class)
+        pickupableCache[key] = false
+        return false
+    end
+
     -- Class blacklist (exact match)
     if blacklistedClasses[class] then
         vrmod.logger.Debug("IsNonPickupable: Class is blacklisted -> " .. class)
@@ -88,7 +96,7 @@ function vrmod.utils.IsNonPickupable(ent)
         return true
     end
 
-    -- Pattern blacklists
+    -- Pattern blacklists (now safe: won't catch prop_dynamic etc. because of the override above)
     for _, pattern in ipairs(blacklistedPatterns) do
         pattern = pattern:lower()
         if class:find(pattern, 1, true) or model:find(pattern, 1, true) then
@@ -96,13 +104,6 @@ function vrmod.utils.IsNonPickupable(ent)
             pickupableCache[key] = true
             return true
         end
-    end
-
-    -- Weapon or important item overrides
-    if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or vrmod.utils.IsImportantPickup(ent) then
-        vrmod.logger.Debug("IsNonPickupable: Entity is a weapon, prop, or important pickup -> " .. class)
-        pickupableCache[key] = false
-        return false
     end
 
     local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
@@ -243,12 +244,35 @@ end
 
 function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
     if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
+    local searchRadius = 35
+    local nearby = ents.FindInSphere(handPos, searchRadius)
+    local bestEnt = nil
+    local bestDist = math.huge
+    for _, e in ipairs(nearby) do
+        if IsValid(e) and e ~= ply and vrmod.utils.IsValidPickupTarget(e, ply, bLeftHand) and vrmod.utils.CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then
+            local closest = e:NearestPoint(handPos)
+            local dist = (closest - handPos):Length()
+            if dist < bestDist and dist <= searchRadius then
+                local tr = util.TraceLine({
+                    start = handPos,
+                    endpos = closest + (closest - handPos):GetNormalized() * 1.5,
+                    filter = ply,
+                    mask = MASK_SHOT
+                })
+
+                if tr.Entity == e or not tr.Hit or tr.Fraction > 0.95 then
+                    bestDist = dist
+                    bestEnt = e
+                end
+            end
+        end
+    end
+
+    if IsValid(bestEnt) and bestDist <= 18 then return bestEnt end
     local ent
     local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
-    -- Sphere search first
     local sphereEnt, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
     if IsValid(sphereEnt) and sphereEnt ~= ply and vrmod.utils.IsValidPickupTarget(sphereEnt, ply, bLeftHand) and vrmod.utils.CanPickupEntity(sphereEnt, ply, convarValues or vrmod.GetConvars()) then ent = sphereEnt end
-    -- Fallback to trace if sphere failed validation
     if not IsValid(ent) then
         local hand = bLeftHand and "left" or "right"
         local tr = vrmod.utils.TraceHand(ply, hand, true)
@@ -259,21 +283,15 @@ function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRa
     end
 
     if not IsValid(ent) then return nil end
-    -- Range check with boost
-    local boost = 1.0
-    if vrmod.utils.IsImportantPickup(ent) then
-        boost = 5.0
-    else
-        if ent:IsNPC() then boost = 3.0 end
-    end
-
-    local maxDist = pickupRange * 10 * boost
-    if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then return nil end
-    -- Weapon-specific rules
+    local closestFinal = ent:NearestPoint(handPos)
+    local finalDist = (closestFinal - handPos):Length()
+    local boost = vrmod.utils.IsImportantPickup(ent) and 5 or ent:IsNPC() and 3 or 1
+    local maxDist = pickupRange * 12 * boost
+    if finalDist > maxDist then return nil end
     if vrmod.utils.IsWeaponEntity(ent) then
         local aw = ply:GetActiveWeapon()
         if IsValid(aw) and aw:GetClass() == ent:GetClass() then return nil end
-        if not bLeftHand and vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then return nil end
+        if not bLeftHand and vrmod.utils.IsValidWep(aw) then return nil end
     end
     return ent
 end
@@ -596,75 +614,49 @@ if SERVER then
 
     function vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
         if not IsValid(ent) then return false end
-        -- safe defaults for DEFAULT_OFFSET
-        local DEFAULT_OFFSET = vrmod and vrmod.DEFAULT_OFFSET or 5
-        -- Collision bounds -> compute entity radius/tolerance (mirror client)
-        local mins, maxs = ent:GetCollisionBounds()
-        if mins and maxs then
-            local entitySize = (maxs - mins):Length()
-            local tolerance = entitySize * 0.5
-            local distSqr = handPos:DistToSqr(ent:GetPos())
-            if distSqr < tolerance * tolerance then
-                -- Too close → do not snap; keep entity where it is
-                return false
-            end
-        end
-
-        local forward = handAng:Forward()
-        local finalPos = handPos + forward
-        local toEntity = finalPos - handPos
-        local dist = toEntity:Length()
-        local entityRadius = 0
-        if mins and maxs then entityRadius = (maxs - mins):Length() * 0.2 end
-        local safeDistance = entityRadius or DEFAULT_OFFSET
-        if dist < safeDistance then
-            if dist == 0 then
-                toEntity = forward
-                dist = 1
-            end
-
-            finalPos = handPos + toEntity:GetNormalized() * safeDistance
-        end
-
+        -- NEW: Use NearestPoint for realistic "holding on surface" feel (prevents hand inside prop)
+        local gripPoint = ent:NearestPoint(handPos)
+        local gripToRoot = ent:GetPos() - gripPoint
+        local targetPos = handPos + gripToRoot
+        vrmod.logger.Debug("SnapEntityToHand: Using surface grip. gripPoint=" .. tostring(gripPoint) .. " targetPos=" .. tostring(targetPos))
         -- Ragdoll: set each physics object to its stored per-phys offset (if present),
-        -- but use finalPos as the anchor instead of handPos so the whole ragdoll sits in front.
+        -- but use targetPos as the anchor instead of handPos so the whole ragdoll sits naturally.
         if ent:GetClass() == "prop_ragdoll" and ent.vrmod_physOffsets then
             for i = 0, ent:GetPhysicsObjectCount() - 1 do
                 local phys = ent:GetPhysicsObjectNum(i)
                 if IsValid(phys) and ent.vrmod_physOffsets[i] then
                     local offset = ent.vrmod_physOffsets[i]
-                    local targetPos, targetAng = LocalToWorld(offset.localPos, offset.localAng, finalPos, handAng)
+                    local targetPhysPos, targetPhysAng = LocalToWorld(offset.localPos, offset.localAng, targetPos, handAng)
                     phys:Wake()
-                    phys:SetPos(targetPos)
-                    phys:SetAngles(targetAng)
+                    phys:SetPos(targetPhysPos)
+                    phys:SetAngles(targetPhysAng)
                     phys:SetVelocity(Vector(0, 0, 0))
                     phys:SetAngleVelocity(Vector(0, 0, 0))
                 end
             end
 
             -- also move the entity root to match phys positions so ent:GetPos() matches clients
-            ent:SetPos(finalPos)
-            ent:SetAngles(handAng) -- keep a sensible orientation; you can change to ent:GetAngles() if you prefer
+            ent:SetPos(targetPos)
+            ent:SetAngles(handAng)
             if ent.InvalidateBoneCache then ent:InvalidateBoneCache() end
             if ent.SetupBones then ent:SetupBones() end
             return true
         end
 
-        -- Non-ragdolls: move root physics object and entity to finalPos (do not place at hand origin)
+        -- Non-ragdolls: move root physics object and entity to targetPos (surface-aligned)
         local phys = ent:GetPhysicsObject()
         if IsValid(phys) then
             phys:Wake()
-            phys:SetPos(finalPos)
-            -- keep entity orientation stable — preserve current angles instead of forcing handAng
+            phys:SetPos(targetPos)
+            -- preserve original orientation for natural hold
             phys:SetAngles(ent:GetAngles())
             phys:SetVelocity(Vector(0, 0, 0))
             phys:SetAngleVelocity(Vector(0, 0, 0))
-            ent:SetPos(finalPos)
+            ent:SetPos(targetPos)
             ent:SetAngles(ent:GetAngles())
         else
             -- fallback: set entity transform directly
-            ent:SetPos(finalPos)
-            -- keep original orientation
+            ent:SetPos(targetPos)
             ent:SetAngles(ent:GetAngles())
         end
 
