@@ -46,6 +46,11 @@ local function SavePickupLists()
     file.Write(listPath, util.TableToJSON(vrmod.pickupLists, true))
 end
 
+local function IsReAgdollHiddenNPC(ent)
+    if not IsValid(ent) then return false end
+    return ent.ReAgdoll_HiddenNPC == true or ent:GetNWBool("ReAgdoll_HiddenNPC", false) == true
+end
+
 vrmod.LoadPickupLists = LoadPickupLists
 vrmod.SavePickupLists = SavePickupLists
 if CLIENT then net.Receive("vrmod_pickuplists_reload", function() vrmod.LoadPickupLists() end) end
@@ -161,6 +166,7 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
         return false
     end
 
+    if IsReAgdollHiddenNPC(ent) then return false end
     if bLeftHand and ent == g_VR.heldEntityLeft then
         vrmod.logger.Debug("IsValidPickupTarget: Already held in left hand -> " .. ent:GetClass())
         invalidPickupCache[ent] = false

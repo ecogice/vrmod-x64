@@ -265,6 +265,32 @@ if SERVER then
 		end
 	end
 
+	-- Helper function to mark + auto-clean
+	local function MarkAsReAgdollHidden(ent)
+		if not IsValid(ent) then return end
+		ent.ReAgdoll_HiddenNPC = true
+		ent:SetNWBool("ReAgdoll_HiddenNPC", true)
+		-- Auto-cleanup when entity is removed
+		ent:CallOnRemove("ReAgdoll_HiddenNPC_Cleanup", function(e)
+			if IsValid(e) then
+				e.ReAgdoll_HiddenNPC = nil
+				-- NWBool will automatically disappear when entity is removed
+			end
+		end)
+	end
+
+	-- Hook for NPC ragdolls created by ReAgdoll
+	hook.Add("ReAgdoll_CreateNPCRagdoll", "MyVR_ReAgdollHiddenNPC", function(npc, ragdoll)
+		MarkAsReAgdollHidden(npc)
+		MarkAsReAgdollHidden(ragdoll)
+	end)
+
+	-- Hook for Player ragdolls created by ReAgdoll
+	hook.Add("ReAgdoll_CreatePlayerRagdoll", "MyVR_ReAgdollHiddenPlayer", function(ply, ragdoll)
+		MarkAsReAgdollHidden(ply)
+		MarkAsReAgdollHidden(ragdoll)
+	end)
+
 	hook.Add("Think", "VRMod_UpdatePickupFlags", function()
 		if not UpdateCoroutine or coroutine.status(UpdateCoroutine) == "dead" then UpdateCoroutine = coroutine.create(UpdatePickupFlagsCoroutine) end
 		if coroutine.status(UpdateCoroutine) == "suspended" then
