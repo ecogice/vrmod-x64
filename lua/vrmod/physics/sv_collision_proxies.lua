@@ -21,13 +21,16 @@ end
 local function ApplySphere(proxyEnt, proxyData, radius)
     if not IsValid(proxyEnt) then return end
     Log("ApplySphere radius=%.2f", radius)
-    proxyEnt:PhysicsInitSphere(radius, "metal")
+    -- Empty string = no specific surface material → much quieter collisions
+    proxyEnt:PhysicsInitSphere(radius, "")
     proxyEnt:SetSolid(SOLID_VPHYSICS)
     proxyEnt:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
     proxyEnt:Activate()
     local phys = proxyEnt:GetPhysicsObject()
     if IsValid(phys) then
         phys:SetMass(70)
+        phys:EnableDrag(false)
+        phys:SetDamping(0.05, 0.1)
         proxyData.phys = phys
         Log("ApplySphere SUCCESS")
     end
@@ -250,7 +253,7 @@ hook.Add("PreEntityEmitEffect", "VRProxy_BlockEffects", function(ent, effect)
 end)
 
 -- ==================== SHADOW CONTROL IN THINK ====================
-hook.Add("Think", "VRProxy_PhysicsSync", function()
+hook.Add("Tick", "VRProxy_PhysicsSync", function()
     if not cvEnableProxy:GetBool() then
         local plysToClean = {}
         for ply in pairs(vrProxies) do
@@ -266,11 +269,7 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
     for _, ply in ipairs(player.GetHumans()) do
         if not vrmod.IsPlayerInVR(ply) then continue end
         if ply:GetMoveType() == MOVETYPE_NOCLIP then
-            if vrProxies[ply] then
-                RemoveVRProxies(ply)
-                Log("Removed proxies due to noclip for %s", ply:Nick())
-            end
-
+            if vrProxies[ply] then RemoveVRProxies(ply) end
             continue
         end
 
@@ -295,7 +294,6 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
             local pos, ang
             if part == "head" then
                 pos, ang = vrmod.GetHMDPose(ply)
-                if not pos or not ang then return end
             elseif part == "right" then
                 pos, ang = vrmod.GetRightHandPose(ply)
             else
@@ -305,12 +303,12 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
             if not pos or not ang then return end
             local targetPos
             if part == "head" then
-                targetPos = pos + ang:Up() * -5 -- -6 = slight down, -10 = more down
+                targetPos = pos + ang:Up() * -5
             else
                 targetPos = pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
             end
 
-            -- Prevent proxy from being forced inside walls (causes sparkles when hand pose clips geometry)
+            -- Anti-clip trace (keep this)
             local trace = util.TraceHull({
                 start = pos,
                 endpos = targetPos,
@@ -324,15 +322,15 @@ hook.Add("Think", "VRProxy_PhysicsSync", function()
             local phys = proxyData.phys
             phys:Wake()
             phys:ComputeShadowControl({
-                secondstoarrive = engine.TickInterval(),
+                secondstoarrive = 0.008, 
                 pos = targetPos,
                 angle = ang,
-                maxangular = 1000,
-                maxangulardamp = 1000,
-                maxspeed = 35000,
-                maxspeeddamp = 2200,
-                dampfactor = 0.5,
-                teleportdistance = 300,
+                maxangular = 6000,
+                maxangulardamp = 6000,
+                maxspeed = 85000, 
+                maxspeeddamp = 4500,
+                dampfactor = 0.75,
+                teleportdistance = 400,
                 deltatime = 0,
             })
         end
