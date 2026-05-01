@@ -248,7 +248,6 @@ function vrmod.utils.GetSteeringInfo(ply)
         end
     end
 
-    print(boneName)
     if boneId then return vehicle, boneId, boneType, false, boneName end
     return vehicle, nil, "unknown", false, nil
 end
@@ -366,4 +365,16 @@ function vrmod.utils.PatchGlideCamera()
         -- Non-VR
         self:_OrigCreateMove(cmd)
     end
+end
+
+function vrmod.utils.IsInChair(ply)
+    if not IsValid(ply) then return false end
+    local veh = ply:GetVehicle()
+    if not IsValid(veh) then return false end
+    return veh:GetClass() == "prop_vehicle_prisoner_pod"
+end
+
+function vrmod.utils.inRealVehicle(ply)
+    if not IsValid(ply) or not ply:InVehicle() then return false end
+    return not vrmod.utils.IsInChair(ply)
 end

@@ -200,7 +200,9 @@ function vrmod.utils.IsIgnoredProp(ent)
 end
 
 function vrmod.utils.CanPickupEntity(v, ply, cv)
-    if not IsValid(v) or v == ply or ply:InVehicle() then return false end
+    if not IsValid(v) or v == ply then return false end
+    -- Block picking up the exact chair the player is currently sitting in
+    if ply:InVehicle() and v == ply:GetVehicle() then return false end
     if cv.vrmod_pickup_npcs == 1 then if v:IsNPC() or v:IsNextBot() then return true end end
     local class = v:GetClass():lower()
     local model = (v:GetModel() or ""):lower()
@@ -210,7 +212,6 @@ function vrmod.utils.CanPickupEntity(v, ply, cv)
         if vrmod.pickupLists.blacklist[key] then return false end
     end
 
-    -- Only do physics mass check server-side
     if SERVER then
         local phys = v:GetPhysicsObject()
         if not IsValid(phys) then return false end
