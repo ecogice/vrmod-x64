@@ -1,6 +1,8 @@
-## **GarrysMod VRMod x64 – Extended**
+## **🥽 [G]VRMod: Ultimate**
 
-![VRmodX64-JayPegged](https://github.com/user-attachments/assets/d08e80cd-b8e6-4348-b56d-70e2e79fa8a6)
+<img width="1000" height="1000" alt="15378236_Thumbnail" src="https://github.com/user-attachments/assets/d262fbf2-649e-4ab2-82a7-3e65bbac821a" />
+
+
 
 
 ### ⚠️ Optimization Issues
