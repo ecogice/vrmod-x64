@@ -51,7 +51,9 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Ensure your system supports **GMod x64**.
 - On native Linux, run the following script first:[GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
 - For trully native experience, use [Steam-Play-None](https://github.com/Scrumplex/Steam-Play-None)
-- Please note that only ALVR is now supported.
+- Please note that only ALVR is now supported on Linux.
+- It's recommended to use latest Linux dev modules or compile your own for Linux.
+- If you are on Windows and comming from the original, you can keep the old modules.
 
 **Installation:**
 
