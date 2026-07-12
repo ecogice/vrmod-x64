@@ -278,6 +278,44 @@ function VRUtilOpenMenu()
 		y = y + 20
 		AddCB("Auto offset (disable if having rendering issues)", "vrmod_renderoffset", y)
 		y = y + 20
+		do
+			local projectionFix = vgui.Create("DButton", t)
+			projectionFix:SetPos(20, y + 5)
+			projectionFix:SetSize(370, 30)
+
+			local function UpdateProjectionFixText()
+				local enabled = convars.vrmod_projectionfix:GetBool()
+				projectionFix:SetText(enabled and "Disable full-FOV projection fix" or "Enable full-FOV projection fix")
+			end
+
+			UpdateProjectionFixText()
+			function projectionFix:DoClick()
+				local enabled = not convars.vrmod_projectionfix:GetBool()
+				convars.vrmod_projectionfix:SetBool(enabled)
+				-- Keep the legacy setting in the same known-good state as the
+				-- projection bundle. The new path does not consume renderoffset,
+				-- but restoring it on disable preserves the original defaults.
+				convars.vrmod_renderoffset:SetBool(not enabled)
+				UpdateProjectionFixText()
+				if g_VR.active then
+					frame:Remove()
+					VRUtilClientExit()
+					timer.Simple(1, function() VRUtilClientStart() end)
+				else
+					notification.AddLegacy(enabled and "Full-FOV projection fix enabled" or "Full-FOV projection fix disabled", NOTIFY_GENERIC, 4)
+				end
+			end
+
+			y = y + 40
+			local help = vgui.Create("DLabel", t)
+			help:SetPos(20, y)
+			help:SetSize(370, 34)
+			help:SetDark(true)
+			help:SetWrap(true)
+			help:SetText("Opt-in asymmetric eye projection with full image coverage. Clicking restarts an active VR session.")
+			y = y + 40
+		end
+
 		AddCB("3D Skybox (disable for more FPS)", "vrmod_skybox", y)
 		do
 			local s = vgui.Create("DNumSlider", t)
@@ -451,6 +489,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_postprocess", "0")
 			RunConsoleCommand("vrmod_skybox", "0")
 			RunConsoleCommand("vrmod_renderoffset", "1")
+			RunConsoleCommand("vrmod_projectionfix", "0")
 			RunConsoleCommand("vrmod_viewscale", "1.0")
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
