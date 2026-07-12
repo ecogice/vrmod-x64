@@ -20,6 +20,8 @@ if CLIENT then
 	local hfovLeft, hfovRight
 	local aspectLeft, aspectRight
 	local leftCalc, rightCalc
+	local fixedProjectionLeft, fixedProjectionRight
+	local projectionFixEnabled = false
 	local ipd, eyez
 	local cropVerticalMargin, cropHorizontalOffset
 	local lastPosePos = {}
@@ -309,8 +311,15 @@ if CLIENT then
 		local rtH = g_VR.rtHeight
 		-- left eye
 		g_VR.view.origin = g_VR.eyePosLeft
-		g_VR.view.fov = hfovLeft
-		g_VR.view.aspectratio = aspectLeft
+		if projectionFixEnabled then
+			g_VR.view.fov = fixedProjectionLeft.HorizontalFOV
+			g_VR.view.aspectratio = fixedProjectionLeft.AspectRatio
+			g_VR.view.offcenter = fixedProjectionLeft.OffCenter
+		else
+			g_VR.view.fov = hfovLeft
+			g_VR.view.aspectratio = aspectLeft
+			g_VR.view.offcenter = nil
+		end
 		g_VR.view.x = 0
 		g_VR.view.y = 0
 		g_VR.view.w = rtHalfW
@@ -319,8 +328,15 @@ if CLIENT then
 		render.RenderView(g_VR.view)
 		-- right eye
 		g_VR.view.origin = g_VR.eyePosRight
-		g_VR.view.fov = hfovRight
-		g_VR.view.aspectratio = aspectRight
+		if projectionFixEnabled then
+			g_VR.view.fov = fixedProjectionRight.HorizontalFOV
+			g_VR.view.aspectratio = fixedProjectionRight.AspectRatio
+			g_VR.view.offcenter = fixedProjectionRight.OffCenter
+		else
+			g_VR.view.fov = hfovRight
+			g_VR.view.aspectratio = aspectRight
+			g_VR.view.offcenter = nil
+		end
 		g_VR.view.x = rtHalfW
 		g_VR.view.y = 0
 		g_VR.view.w = rtHalfW
@@ -377,6 +393,7 @@ if CLIENT then
 		local vOffset = convars.vrmod_verticaloffset:GetFloat()
 		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
+		projectionFixEnabled = convars.vrmod_projectionfix:GetBool()
 		g_VR.desktopView = convars.vrmod_desktopview:GetInt()
 		-- compute display params with fallback
 		local dp = ComputeDisplayParams() or {}
@@ -390,6 +407,13 @@ if CLIENT then
 		aspectRight = dp.aspR or 1
 		ipd = dp.ipd or 0.064
 		eyez = dp.eyez or 0
+		if projectionFixEnabled then
+			local eyeWidth = g_VR.rtWidth / 2
+			fixedProjectionLeft = vrmod.utils.ComputeOffCenterProjection(leftCalc, eyeWidth, g_VR.rtHeight, hOffset, vOffset, scaleFactor)
+			fixedProjectionRight = vrmod.utils.ComputeOffCenterProjection(rightCalc, eyeWidth, g_VR.rtHeight, hOffset, vOffset, scaleFactor)
+		else
+			fixedProjectionLeft, fixedProjectionRight = nil, nil
+		end
 		cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
 		VRMOD_ShareTextureBegin()
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
@@ -405,7 +429,12 @@ if CLIENT then
 
 		VRMOD_ShareTextureFinish()
 		-- submit bounds
-		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		local bounds
+		if projectionFixEnabled then
+			bounds = {vrmod.utils.ComputeFixedSubmitBounds()}
+		else
+			bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		end
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 	end
 
