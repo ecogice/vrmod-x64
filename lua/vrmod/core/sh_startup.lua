@@ -52,6 +52,9 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
+    -- Opt-in: render the headset projection with RenderView.offcenter instead of
+    -- emulating it with shifted (and potentially out-of-range) compositor UVs.
+    vrmod.AddCallbackedConvar("vrmod_projectionfix", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_viewscale", nil, "1.0")
     vrmod.AddCallbackedConvar("vrmod_fovscale_x", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_fovscale_y", nil, "1")
