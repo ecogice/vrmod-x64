@@ -24,6 +24,9 @@ function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
         AspectRatio = w / h,
         HorizontalOffset = xoffset,
         VerticalOffset = yoffset,
+        XScale = xscale,
+        YScale = yscale,
+        WorldScale = worldScale,
         Width = w,
         Height = h,
     }
@@ -70,6 +73,63 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset + vOffset)
     local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset + vOffset)
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
+end
+
+-- Build an exact asymmetric projection using RenderView's symmetric FOV plus an
+-- in-bounds off-center crop. A symmetric envelope contains all four headset
+-- frustum planes, then offcenter selects only the requested eye frustum.
+function vrmod.utils.ComputeOffCenterProjection(calc, viewportWidth, viewportHeight, hOffset, vOffset, scaleFactor)
+    hOffset = hOffset or 0
+    vOffset = vOffset or 0
+    scaleFactor = scaleFactor or 1
+
+    local xscale = math.abs(calc.XScale)
+    local yscale = math.abs(calc.YScale)
+    local worldScale = math.max(math.abs(calc.WorldScale or 1), 0.0001)
+    -- Moving the projection center is the inverse of moving the legacy sampled
+    -- texture window. OpenVR's horizontal matrix convention therefore needs the
+    -- opposite sign when expressed through Source's offcenter crop; without
+    -- this, the left and right asymmetric frusta appear exchanged.
+    local xoffset = -(calc.HorizontalOffset + hOffset) * scaleFactor
+    local yoffset = (calc.VerticalOffset + vOffset) * scaleFactor
+
+    -- Tangents at NDC -1/+1, matching CalculateProjectionParams.
+    local tanLeft = (-1 - xoffset) / xscale / worldScale
+    local tanRight = (1 - xoffset) / xscale / worldScale
+    local tanYMin = (-1 - yoffset) / yscale / worldScale
+    local tanYMax = (1 - yoffset) / yscale / worldScale
+
+    local halfX = math.max(math.abs(tanLeft), math.abs(tanRight), 0.0001)
+    local halfY = math.max(math.abs(tanYMin), math.abs(tanYMax), 0.0001)
+    local left = (tanLeft + halfX) / (2 * halfX) * viewportWidth
+    local right = (tanRight + halfX) / (2 * halfX) * viewportWidth
+    local top = (halfY - tanYMax) / (2 * halfY) * viewportHeight
+    local bottom = (halfY - tanYMin) / (2 * halfY) * viewportHeight
+
+    return {
+        HorizontalFOV = math.deg(2 * math.atan(halfX)),
+        AspectRatio = halfX / halfY,
+        OffCenter = {
+            left = left,
+            right = right,
+            top = top,
+            bottom = bottom,
+        },
+    }
+end
+
+-- Normal side-by-side bounds. Projection offsets must not be applied here when
+-- ComputeOffCenterProjection is active, otherwise the correction happens twice.
+function vrmod.utils.ComputeFixedSubmitBounds()
+    local inset = 0.003
+    local vMin, vMax
+    if system.IsWindows() then
+        vMin, vMax = inset, 1.0 - inset
+    else
+        vMin, vMax = 1.0 - inset, inset
+    end
+
+    return inset, vMin, 0.5, vMax, 0.5, vMin, 1.0 - inset, vMax
 end
 
 function vrmod.utils.AdjustFOV(proj, fovScaleX, fovScaleY)
