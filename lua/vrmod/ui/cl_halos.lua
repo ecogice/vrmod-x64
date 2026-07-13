@@ -3,7 +3,6 @@ local halos = {}
 local haloCount = 0
 local haloFrame = 0
 local haloRT, haloMat
-local localAng = Angle(0, -90, -90)
 local haloAdd_orig
 timer.Simple(0, function() haloAdd_orig = halo.Add end)
 hook.Add("VRMod_Start", "halos", function(ply)
@@ -30,6 +29,20 @@ hook.Add("VRMod_Start", "halos", function(ply)
 					--
 					render.PushRenderTarget(haloRT)
 					render.Clear(0, 0, 0, 255, true, true)
+					-- A pushed render target does not inherit a reliable 3D camera. Recreate
+					-- the active eye exactly so the mask and world use the same projection.
+					cam.Start({
+						type = "3D",
+						origin = g_VR.view.origin,
+						angles = g_VR.view.angles,
+						x = 0,
+						y = 0,
+						w = g_VR.view.w,
+						h = g_VR.view.h,
+						fov = g_VR.view.fov,
+						aspect = g_VR.view.aspectratio,
+						offcenter = g_VR.view.offcenter,
+					})
 					render.SetStencilEnable(true)
 					render.SetStencilWriteMask(0xFF)
 					render.SetStencilTestMask(0xFF)
@@ -52,30 +65,29 @@ hook.Add("VRMod_Start", "halos", function(ply)
 						end
 					end
 
+					cam.End3D()
 					render.SetStencilEnable(false)
 					render.BlurRenderTarget(haloRT, 2, 2, 1)
 					render.SetStencilEnable(true)
 					render.ClearBuffersObeyStencil(0, 0, 0, 255, false)
 					render.SetStencilEnable(false)
 					render.PopRenderTarget()
-					local w = 10 * math.tan(math.rad(g_VR.view.fov / 2))
-					local h = w * 1 / g_VR.view.aspectratio
-					local pos = EyePos() + EyeAngles():Forward() * 10 + EyeAngles():Right() * -w + EyeAngles():Up() * h
-					local _, ang = LocalToWorld(Vector(0, 0, 0), localAng, Vector(0, 0, 0), EyeAngles())
-					local mtx = Matrix()
-					mtx:Translate(pos)
-					mtx:Rotate(ang)
-					mtx:Scale(Vector(w * 2, h * 2, 0))
-					cam.PushModelMatrix(mtx)
+					-- DrawScreenQuad targets the screen abstraction and can escape a per-eye
+					-- viewport. Draw an explicit pixel rectangle into the shared VR target.
+					render.PushRenderTarget(g_VR.rt)
+					cam.Start2D()
+					local oldClipping = DisableClipping(true)
 					surface.SetDrawColor(255, 255, 255, 255)
 					surface.SetMaterial(haloMat)
 					render.OverrideBlend(true, BLEND_ONE, BLEND_ONE, BLENDFUNC_ADD, 0, 0, 0)
 					render.OverrideDepthEnable(true, false)
-					surface.DrawTexturedRect(0, 0, 1, 1)
-					surface.DrawTexturedRect(0, 0, 1, 1)
+					surface.DrawTexturedRect(g_VR.view.x, g_VR.view.y, g_VR.view.w, g_VR.view.h)
+					surface.DrawTexturedRect(g_VR.view.x, g_VR.view.y, g_VR.view.w, g_VR.view.h)
 					render.OverrideDepthEnable(false)
 					render.OverrideBlend(false)
-					cam.PopModelMatrix()
+					DisableClipping(oldClipping)
+					cam.End2D()
+					render.PopRenderTarget()
 					--
 				end)
 			end
