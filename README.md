@@ -44,5 +44,15 @@ This is necessary. Once asymmetry is applied during scene rendering, retaining t
 5. Keep the change opt-in
 (sh_startup.lua and cl_settings.lua)
 ```
+also did a fix for broken halos
+```
+VRMod originally rendered the halo into a temporary texture, then placed that texture on a 3D plane in front of the camera. Asymmetric projection transformed that plane again, so the already-projected halo shifted, stretched horizontally, and could appear in the wrong eye.
+The final fix:
+- Recreates the active eye’s 3D camera when drawing the halo mask, including its origin, angles, FOV, aspect ratio, size, and offcenter rectangle.
+- Keeps the existing stencil, coloring, and blur process.
+- Removes the camera-facing 3D composite plane.
+- Draws the finished halo texture directly into explicit pixels of the shared VR target: the left half for the left eye and the right half for the right eye.
+- Disables surface clipping during that copy because the VR render target is wider than the desktop framebuffer.
+```
 
 Please keep in mind I didnt write any of this I just wanted it fixed
